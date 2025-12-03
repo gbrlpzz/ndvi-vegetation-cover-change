@@ -60,6 +60,7 @@ While Sentinel-2 offers higher spatial resolution (10 m), this system uses **har
 ## Key Variables
 
 | Variable | Description | Default Value |
+|----------|-------------|---------------|
 | startYear | Start year for annual change analysis. | 1985 |
 | endYear | End year for annual change analysis. | 2023 |
 | forestThreshold | NDVI value used to define forest cover. | 0.45 |
