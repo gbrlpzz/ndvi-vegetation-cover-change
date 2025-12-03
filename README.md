@@ -40,6 +40,17 @@ Reforestation (Gain): Pixels that were Open in the Start State and Forest in the
 
 For pixels identified as Reforestation, a pixel-by-pixel time series analysis is performed between startYear (1985) and endYear (2023). The script finds the earliest year in this range where the pixel's median summer NDVI first crosses the 0.45 forest threshold. This year is recorded in the finalRecoveryMap.
 
+## Intended Applications
+
+This workflow is designed for analyzing long-term land use transitions where forest cover gain or loss reflects broader socio-ecological processes. Typical use-cases include:
+
+* **Agricultural land abandonment** and subsequent **forest encroachment**
+* **Forest recovery** following disturbances, logging, or historical land-use changes
+* **Landscape transition monitoring** in rural and peri-urban territories
+* **Temporal mapping** of legacy land-use decisions with ecological implications
+
+While Sentinel-2 offers higher spatial resolution (10 m), this system uses **harmonized Landsat data (30 m) since 1985** to capture **decades-long trajectories** of abandonment and forest succession. This provides the temporal depth required in regions—such as much of Italy—where major land abandonment and recovery events occurred well before the Copernicus era.
+
 ## Key Variables
 
 | Variable | Description | Default Value |
@@ -56,9 +67,10 @@ Landsat 7 ETM+: LANDSAT/LE07/C02/T1_L2
 
 Landsat 8 OLI/TIRS: LANDSAT/LC08/C02/T1_L2
 
+Landsat 9 OLI-2/TIRS-2: LANDSAT/LC09/C02/T1_L2
+
+
+
 ## Contact
 
 Gabriele Pizzi | info@gabrielepizzi.com | gabrielepizzi.com
-
-
-Landsat 9 OLI-2/TIRS-2: LANDSAT/LC09/C02/T1_L2
