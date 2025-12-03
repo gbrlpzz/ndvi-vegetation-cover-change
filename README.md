@@ -40,6 +40,10 @@ Reforestation (Gain): Pixels that were Open in the Start State and Forest in the
 
 For pixels identified as Reforestation, a pixel-by-pixel time series analysis is performed between startYear (1985) and endYear (2023). The script finds the earliest year in this range where the pixel's median summer NDVI first crosses the 0.45 forest threshold. This year is recorded in the finalRecoveryMap.
 
+## Example Output
+
+<img width="1289" height="906" alt="Screenshot 2025-12-03 at 18 18 59" src="https://github.com/user-attachments/assets/e2533ce5-cfd6-448f-8f5d-583edd25e035" />
+
 ## Intended Applications
 
 This workflow is designed for analyzing long-term land use transitions where forest cover gain or loss reflects broader socio-ecological processes. Typical use-cases include:
