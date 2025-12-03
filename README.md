@@ -81,4 +81,6 @@ This project is licensed under the Apache License 2.0. See LICENSE for full term
 
 ## Contact
 
+For research collaboration or region-specific analyses, you’re welcome to reach out.
+
 Gabriele Pizzi | info@gabrielepizzi.com | gabrielepizzi.com
