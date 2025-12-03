@@ -50,10 +50,6 @@ For pixels identified as Reforestation, a pixel-by-pixel time series analysis is
 | forestThreshold | NDVI value used to define forest cover. | 0.45 |
 | roi | The region of interest for analysis. | Current Map Bounds |
 
-## Citations and Data Sources
-
-The accuracy of this analysis depends entirely on the underlying remotely sensed data and the standard indices used.
-
 ## Data Sources
 
 Landsat 5 TM: LANDSAT/LT05/C02/T1_L2
