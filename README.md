@@ -51,6 +51,9 @@ For pixels identified as Reforestation, a pixel-by-pixel time series analysis is
 ## Data Sources
 
 Landsat 5 TM: LANDSAT/LT05/C02/T1_L2
+
 Landsat 7 ETM+: LANDSAT/LE07/C02/T1_L2
+
 Landsat 8 OLI/TIRS: LANDSAT/LC08/C02/T1_L2
+
 Landsat 9 OLI-2/TIRS-2: LANDSAT/LC09/C02/T1_L2
