@@ -6,13 +6,13 @@ This Google Earth Engine (GEE) script performs a retrospective analysis of fores
 
 Deforestation (Loss) Mask: Areas classified as forest during the baseline period (1985–1987) that transitioned to open land by the end period (2021–2023).
 
-Reforestation (Gain) Map: Areas classified as open land during the baseline period that transitioned to forest by the end period. For these gain areas, the map provides the approximate year of detection when the pixel first crossed the forest threshold.
+Reforestation (Gain) Map: Areas classified as open land during the baseline period that transitioned to forest by the end period. For these gain areas, the map provides the approximate year of detection, the year the pixel first crossed the forest threshold.
 
 The results are displayed on the map with color coding and configured for export as GeoTIFFs to Google Drive.
 
 ## Methodology
 
-The analysis follows a standard land cover change detection workflow using the Normalized Difference Vegetation Index (NDVI) as the primary forest proxy.
+The analysis follows a standard land cover change-detection workflow, using the Normalized Difference Vegetation Index (NDVI) as the primary proxy for forest cover.
 
 1. Data Harmonization
 
@@ -31,11 +31,9 @@ NDVI ≤ 0.45: Open Land / Non-Forest
 Change is determined by comparing the median summer NDVI (June, July, August, September) across two distinct periods:
 
 Baseline (Start State): 1985–1987
-
 Final (End State): 2021–2023
 
 Deforestation (Loss): Pixels that were Forest in the Start State and Open in the End State.
-
 Reforestation (Gain): Pixels that were Open in the Start State and Forest in the End State.
 
 4. Year of Recovery
