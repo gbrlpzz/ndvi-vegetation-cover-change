@@ -2,9 +2,9 @@
 
 // Define the period of analysis
 var startYear = 1985;
-var endYear = 2023;
+var endYear = 2025;
 // NDVI threshold to classify a pixel as forest
-var forestThreshold = 0.45; 
+var forestThreshold = 0.45;
 
 // Define Region of Interest (ROI). If not explicitly defined, use the map view.
 var roi = roi || Map.getBounds(true);
@@ -55,9 +55,9 @@ var startNDVI = fullCollection.filterDate('1985-01-01', '1987-12-31')
 var wasForest = startNDVI.gt(forestThreshold);
 var wasOpen = startNDVI.lte(forestThreshold);
 
-// B. END STATE (2021-2023 Average)
+// B. END STATE (2023-2025 Average)
 // Calculate median NDVI for the final period (summer months)
-var endNDVI = fullCollection.filterDate('2021-01-01', '2023-12-31')
+var endNDVI = fullCollection.filterDate('2023-01-01', '2025-12-31')
   .filter(ee.Filter.calendarRange(6, 9, 'month'))
   .median().normalizedDifference(['NIR', 'Red']);
 var isForest = endNDVI.gt(forestThreshold);
@@ -77,7 +77,7 @@ var years = ee.List.sequence(startYear, endYear);
 // Create an ImageCollection where each image represents the year 
 // a pixel crossed the forest threshold for that year.
 var annualCollection = ee.ImageCollection.fromImages(
-  years.map(function(y) {
+  years.map(function (y) {
     var year = ee.Number(y);
     // Get median NDVI for the specified year (summer months)
     var img = fullCollection
@@ -108,8 +108,8 @@ var finalRecoveryMap = recoveryYearRaw.updateMask(reforestationMask);
 Map.centerObject(roi);
 
 // Layer 1: Deforestation (Loss)
-Map.addLayer(deforestationMask.selfMask(), 
-  {palette: ['FF00FF']}, // Magenta for Loss
+Map.addLayer(deforestationMask.selfMask(),
+  { palette: ['FF00FF'] }, // Magenta for Loss
   'Deforestation / Loss of Forest');
 
 // Layer 2: Reforestation (Gain)
@@ -127,9 +127,9 @@ Map.addLayer(finalRecoveryMap, vizParams, 'Reforestation (Year of Detection)');
 Map.style().set('cursor', 'crosshair');
 
 // Define the action to run on map click
-Map.onClick(function(coords) {
+Map.onClick(function (coords) {
   var point = ee.Geometry.Point(coords.lon, coords.lat);
-  
+
   // Extract values from the final change maps at the clicked point
   var values = ee.Image.cat([
     finalRecoveryMap.rename('recovery_year'),
@@ -139,29 +139,29 @@ Map.onClick(function(coords) {
     geometry: point,
     scale: 30
   });
-  
+
   // Chart the NDVI time series for the clicked point
   var chart = ui.Chart.image.series({
     imageCollection: fullCollection.select(['NIR', 'Red']),
     region: point,
     reducer: ee.Reducer.median(),
     scale: 30
-  }).map(function(img) {
+  }).map(function (img) {
     // Calculate NDVI for each image in the series
     return img.normalizedDifference(['NIR', 'Red']).rename('NDVI');
   }).setOptions({
-    title: 'NDVI History (1985-2023)',
-    vAxis: {title: 'NDVI', viewWindow: {min: 0, max: 1}},
-    hAxis: {title: 'Year', format: '####'},
+    title: 'NDVI History (1985-2025)',
+    vAxis: { title: 'NDVI', viewWindow: { min: 0, max: 1 } },
+    hAxis: { title: 'Year', format: '####' },
     lineWidth: 1,
     pointSize: 2,
-    series: {0: {color: '000000'}}
+    series: { 0: { color: '000000' } }
   });
-  
+
   // Evaluate the results and print a summary to the console
-  values.evaluate(function(res) {
+  values.evaluate(function (res) {
     print('--- Point Analysis ---');
-    
+
     if (res.recovery_year) {
       print('REFORESTATION DETECTED');
       print('Approx Year of Recovery:', res.recovery_year);
@@ -171,7 +171,7 @@ Map.onClick(function(coords) {
     } else {
       print('STABLE AREA (No change detected)');
     }
-    
+
     print(chart);
   });
 });
