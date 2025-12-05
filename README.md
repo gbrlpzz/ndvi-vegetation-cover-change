@@ -1,96 +1,123 @@
-# Forest Cover Change Detection (1985-2025) using Landsat
+# Vegetation Cover Change Detection (1985-2025)
 
-## Overview
-
-This Google Earth Engine (GEE) script performs a retrospective analysis of forest change across 40 years of data from 1985 to 2025 for a specified Region of Interest (ROI). It utilizes harmonized surface reflectance data from Landsat 5, 7, 8, and 9 missions to generate two primary outputs:
-
-Deforestation (Loss) Mask: Areas classified as forest during the baseline period (1985–1989) that transitioned to open land by the end period (2021–2025).
-
-Reforestation (Gain) Map: Areas classified as open land during the baseline period that transitioned to forest by the end period. For these gain areas, the map provides the approximate **epoch of detection** (5-year period) when the pixel first crossed the forest threshold.
-
-The workflow  is optimised for regions where abandonment and forest transition occurred before the Sentinel-2 era, requiring multi-decadal Landsat continuity.
-
-The results are displayed on the map with color coding and configured for export as GeoTIFFs to Google Drive.
+A Google Earth Engine script for detecting multi-decadal vegetation cover change using harmonized Landsat time series with scientifically validated thresholds.
 
 ## Methodology
 
-The analysis follows a standard land cover change-detection workflow, using the Normalized Difference Vegetation Index (NDVI) as the primary proxy for forest cover.
+### Approach
 
-1. Data Harmonization
+This script uses a **trend-first classification** approach: computing linear NDVI trends across the 40-year record before applying state-based thresholds. This enables detection of active succession at any vegetation stage.
 
-All available Landsat 5, 7, 8, and 9 Level-2, Collection 2, Tier 1 Surface Reflectance data are merged. Each image is processed to mask clouds and cloud shadows using the QA_PIXEL band. Scale factors and offsets are applied to convert the data to standard surface reflectance values, and bands are renamed to NIR and Red for consistency.
+### NDVI Thresholds
 
-2. Forest Classification
+Classification thresholds are aligned with peer-reviewed literature:
 
-A fixed NDVI threshold of 0.45 (forestThreshold) is used to classify pixels:
+| NDVI Range | Class | Scientific Basis |
+|------------|-------|------------------|
+| ≥ 0.60 | Dense Canopy | NDVI 0.6-1.0 = dense green vegetation (FAO, ResearchGate meta-analyses) |
+| 0.40-0.60 | Transitional | Corresponds to FAO "open/fragmented forest" (10-40% canopy) |
+| 0.20-0.40 | Sparse | Sparsely vegetated areas (Copernicus, ISU studies) |
+| < 0.20 | Bare | Exposed soil, minimal vegetation |
 
-NDVI > 0.45: Forest
+**Sources:**
+- FAO Forest Resources Assessment: 10% canopy = forest threshold, 40%+ = closed forest
+- NDVI-canopy correlation: R² = 0.88-0.94 (UAV validation studies)
+- Dense vegetation NDVI > 0.5; forest typically > 0.6 (ResearchGate synthesis)
 
-NDVI ≤ 0.45: Open Land / Non-Forest
+### Trend Analysis
 
-3. Change Calculation
+Linear regression is computed on summer NDVI (June-September) from 1985-2025:
 
-Change is determined by comparing the median summer NDVI (June, July, August, September) across two distinct periods:
+```
+NDVI(t) = slope × t + intercept
+```
 
-Baseline (Start State): 1985–1989 (5-year window)
-Final (End State): 2021–2025 (5-year window)
+| Slope (per year) | Classification | Source |
+|------------------|----------------|--------|
+| > +0.005 | Gaining | MDPI Kunming study (2000-2020): moderate improvement |
+| -0.005 to +0.005 | Stable | Same study: stable conditions range |
+| < -0.005 | Losing | Indicates active decline |
 
-Deforestation (Loss): Pixels that were Forest in the Start State and Open in the End State.
-Reforestation (Gain): Pixels that were Open in the Start State and Forest in the End State.
+**Validation:** The ±0.005/yr threshold represents ~0.2 NDVI change over 40 years, corresponding to a full vegetation class transition.
 
-4. Epoch of Recovery (5-Year Resolution)
+### Change Classification
 
-For pixels identified as Reforestation, a 5-year epoch analysis is performed across seven periods: 1990–1994, 1995–1999, 2000–2004, 2005–2009, 2010–2014, 2015–2019, and 2020–2025. The script finds the earliest epoch in which the pixel's median summer NDVI first crosses the 0.45 forest threshold. This epoch is recorded in the finalRecoveryMap, providing 7 distinct temporal classes for visualization.
+Six change classes combine start/end state with trend direction:
 
-## Example Output
+| Class | Transition | Trend Requirement |
+|-------|------------|-------------------|
+| Canopy Loss | Dense → Sparse/Bare | — |
+| Canopy Thinning | Dense → Transitional | Losing |
+| Emerging Biomass | Sparse → Transitional | Gaining |
+| Canopy Thickening | Transitional → Dense | Gaining |
+| Canopy Densification | Dense → Dense | Gaining |
+| Canopy Establishment | Sparse → Dense | 5-year epoch |
 
-![Example output showing forest change detection with 5-year epochs](example_output_2025.jpg)
+### Trajectory Projection
 
-## Intended Applications
+For gaining areas, linear extrapolation estimates years to reach the dense canopy threshold:
 
-This workflow is designed for analyzing long-term land use transitions where forest cover gain or loss reflects broader socio-ecological processes. Typical use-cases include:
+```
+Years to threshold = (0.60 - current_NDVI) / slope
+```
 
-* **Agricultural land abandonment** and subsequent **forest encroachment**
-* **Forest recovery** following disturbances, logging, or historical land-use changes
-* **Landscape transition monitoring** in rural and peri-urban territories
-* **Temporal mapping** of legacy land-use decisions with ecological implications
-
-While Sentinel-2 offers higher spatial resolution (10 m), this system uses **harmonized Landsat data (30 m) since 1985** to capture **decades-long trajectories** of abandonment and forest succession. This provides the temporal depth required in regions—such as much of Italy—where major land abandonment and recovery events occurred well before the Copernicus era.
-
-## Key Variables
-
-| Variable | Description | Default Value |
-|----------|-------------|---------------|
-| startYear | Start year for annual change analysis. | 1985 |
-| endYear | End year for annual change analysis. | 2025 |
-| forestThreshold | NDVI value used to define forest cover. | 0.45 |
-| roi | The region of interest for analysis. | Current Map Bounds |
+This provides a first-order approximation. Vegetation succession often follows sigmoid (logistic) growth, so actual trajectories may accelerate then plateau.
 
 ## Data Sources
 
-Landsat 5 TM: LANDSAT/LT05/C02/T1_L2
+- **Landsat 5 TM** (1984-2012): `LANDSAT/LT05/C02/T1_L2`
+- **Landsat 7 ETM+** (1999-present): `LANDSAT/LE07/C02/T1_L2`
+- **Landsat 8 OLI** (2013-present): `LANDSAT/LC08/C02/T1_L2`
+- **Landsat 9 OLI-2** (2021-present): `LANDSAT/LC09/C02/T1_L2`
 
-Landsat 7 ETM+: LANDSAT/LE07/C02/T1_L2
+All imagery is Level-2 Surface Reflectance, Collection 2, Tier 1, with cloud/shadow masking via QA_PIXEL.
 
-Landsat 8 OLI/TIRS: LANDSAT/LC08/C02/T1_L2
+## Usage
 
-Landsat 9 OLI-2/TIRS-2: LANDSAT/LC09/C02/T1_L2
+1. Open in [Google Earth Engine Code Editor](https://code.earthengine.google.com/)
+2. Define `roi` or use current map bounds
+3. Run script
+4. Click map to inspect individual pixels with NDVI time series chart
+
+## Key Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `DENSE_CANOPY` | 0.60 | NDVI threshold for closed canopy |
+| `TRANSITIONAL` | 0.40 | NDVI threshold for woodland/shrub |
+| `SPARSE` | 0.20 | NDVI threshold for open vegetation |
+| `GAINING_SLOPE` | 0.005 | Slope threshold for active gain |
+| `LOSING_SLOPE` | -0.005 | Slope threshold for active loss |
+
+## Example Output
+
+![Example output showing vegetation change detection](example_output_2025.jpg)
+
+## Intended Applications
+
+- Agricultural land abandonment and forest succession
+- Post-disturbance vegetation recovery monitoring
+- Landscape transition analysis in rural/peri-urban areas
+- Temporal mapping of land-use change trajectories
 
 ## Citation
 
-If you use this tool in your research, please cite:
-
 ```
-Pizzi, G. (2025). GEE Landsat Forest Cover Change Detection Script. 
+Pizzi, G. (2025). Vegetation Cover Change Detection Script.
 GitHub repository. https://github.com/gbrlpzz/forest-cover-change
 ```
 
-## Contact
+## References
 
-For research collaboration or region-specific analyses, you’re welcome to reach out.
-
-Gabriele Pizzi | info@gabrielepizzi.com | gabrielepizzi.com
+1. FAO (2020). Global Forest Resources Assessment. Rome.
+2. Kunming NDVI Study, MDPI Remote Sensing (2000-2020 analysis)
+3. Copernicus Land Monitoring Service - CORINE Land Cover Technical Guide
+4. Kennedy et al. (2010). Detecting trends in forest disturbance and recovery using yearly Landsat time series.
 
 ## License
-This project is licensed under the Apache License 2.0. See LICENSE for full terms.
 
+Apache License 2.0. See LICENSE for details.
+
+## Contact
+
+Gabriele Pizzi | info@gabrielepizzi.com | gabrielepizzi.com
