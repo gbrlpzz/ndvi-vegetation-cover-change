@@ -90,28 +90,13 @@ Only clear observations are retained for NDVI calculation, ensuring temporal com
 
 == Spectral Harmonization
 
-Landsat 8/9 OLI spectral response differs from Landsat 5/7 TM/ETM+. Following Roy et al. (2016), band values are harmonized to ensure temporal consistency using Ordinary Least Squares (OLS) regression coefficients.
+Landsat 8/9 OLI spectral bands are natively compatible with Landsat 5/7 TM/ETM+ for vegetation analysis when using USGS Collection 2 Level-2 Surface Reflectance data. As confirmed by USGS calibration documents and Crawford et al. (2023), the geometric and radiometric improvements in Collection 2 render post-hoc OLS harmonization unnecessary for most monitoring applications.
 
-#figure(
-  table(
-    columns: (auto, auto, auto),
-    inset: 8pt,
-    align: center,
-    stroke: none,
-    table.header([*Band*], [*Slope ($m$)*], [*Intercept ($c$)*]),
-    table.hline(),
-    [Red], [0.9785], [-0.0095],
-    [Near-Infrared (NIR)], [0.9548], [+0.0068],
-    table.hline(),
-  ),
-  caption: [OLS Transformation Coefficients (Landsat 8 to 7 equivalent)],
-)
+*Processing Protocol:*
+- *Landsat 5 & 7*: Bands B3 (Red) and B4 (NIR).
+- *Landsat 8 & 9*: Bands B4 (Red) and B5 (NIR).
 
-*Harmonization Protocol:*
-- *Landsat 5 & 7*: Treated as spectrally compatible (no transformation).
-- *Landsat 8 & 9*: Transformed using $"L7"_("eq") = m times "L8" + c$.
-
-This correction reduces cross-sensor discontinuities that could otherwise be misinterpreted as vegetation trends.
+Explicit band mapping ensures correct spectral matching without altering pixel values.
 
 = NDVI Classification Thresholds
 
@@ -138,10 +123,10 @@ The selected thresholds align with U.S. Geological Survey (USGS) standards for R
 )
 
 === Dense Canopy (≥ 0.6)
-The USGS states that "dense vegetation such as that found in temperate and tropical forests... typically exhibits NDVI values of approximately 0.6 to 0.9" (USGS, n.d.). This serves as the default reference value for the "Dense Canopy" class, though users should calibrate this based on local phenology.
+Studies on land surface emissivity (Sobrino et al., 2004) classify pixels with NDVI > 0.5 as "fully vegetated." This methodology applies a conservative threshold of 0.6 to define "Dense Canopy," ensuring that only high-biomass, healthy forest structures are captured, significantly reducing false positives from mixed pixels.
 
 === Sparse Vegetation (0.2 – 0.4)
-USGS defines "shrub and grassland" as typically falling between 0.2 and 0.5 (USGS, n.d.). This methodology uses 0.2–0.4 for sparse and 0.4–0.6 for transitional, but these parameters are exposed in the configuration to allow for regional tuning.
+Sobrino et al. (2004) characterize the range 0.2 ≤ NDVI ≤ 0.5 as "mixed pixels" containing a combination of soil and vegetation. Our "Sparse" class (0.2–0.4) strictly targets this heterogeneous interface, while the "Transitional" class (0.4–0.6) captures the upper bound of this mixed zone.
 
 == Sensitivity Analysis
 
@@ -160,20 +145,15 @@ The system includes a `SENSITIVITY_ADJUSTMENT` parameter (default 0.0) that appl
 
 == Linear Trend Computation
 
-Trends are calculated using Ordinary Least Squares (OLS) regression on annual summer median composites.
+Trends are calculated using Ordinary Least Squares (OLS) regression on annual summer median composites. To ensure statistical rigor, the Mann-Kendall trend test (Kendall's Tau) is applied to corresponding pixels.
 
-$ beta = (n sum x y - sum x sum y) / (n sum x^2 - (sum x)^2) $
+$ S = sum_(k=1)^(n-1) sum_(j=k+1)^n "sgn"(x_j - x_k) $
 
-Where:
-- $beta$ = slope (NDVI change per year)
-- $x$ = year (1985, 1986, ..., 2025)
-- $y$ = summer median NDVI for year $x$
-- $y$ = summer median NDVI for year $x$
-- $n$ = number of years in analysis period (dynamic)
+Only trends with a statistical significance of $p < 0.05$ (95% confidence level) are retained. Pixels failing this test are classified as "Stable" regardless of their linear slope magnitude.
 
 == Trend Significance Thresholds
 
-To separate natural variability from significant change, a slope threshold of ±0.005 NDVI/year is applied.
+To separate natural variability from significant change, a slope threshold of ±0.005 NDVI/year is applied to statistically significant pixels.
 
 #figure(
   table(
@@ -182,9 +162,9 @@ To separate natural variability from significant change, a slope threshold of ±
     align: left,
     table.header([*Trend Class*], [*Slope Threshold*]),
     table.hline(),
-    [Gaining], [> +0.005/yr],
-    [Stable], [±0.005/yr],
-    [Losing], [< -0.005/yr],
+    [Gaining], [> +0.005/yr AND $p < 0.05$],
+    [Stable], [±0.005/yr OR $p >= 0.05$],
+    [Losing], [< -0.005/yr AND $p < 0.05$],
     table.hline(),
   ),
   caption: [Trend Significance Thresholds],
@@ -193,32 +173,32 @@ To separate natural variability from significant change, a slope threshold of ±
 === Scientific Basis
 This threshold is derived from Peng & Gong (2025), whose analysis of spatiotemporal NDVI changes classified slopes between 0.005 and 0.016 as "moderate improvement" and defined the stable range as -0.007 to 0.005. This provides a peer-reviewed basis for the cutoff.
 
-=== Momentum Analysis
+=== Recent Trend Analysis
 
-To detect acceleration or deceleration in recent vegetation change, a secondary 10-year trend (2015–2025) is computed and compared to the 40-year baseline trend. This momentum indicator identifies whether change is intensifying or moderating:
+To detect acceleration or deceleration in recent vegetation change, a secondary 10-year trend (2015–2025) is computed and compared to the 40-year baseline trend. This trend acceleration indicator identifies whether change is intensifying or moderating:
 
 #figure(
   table(
     columns: (auto, auto),
     inset: 8pt,
     align: left,
-    table.header([*Momentum Class*], [*Condition*]),
+    table.header([*Change Rate Class*], [*Condition*]),
     table.hline(),
     [Accelerating], [Recent slope > Long-term slope + 0.002],
     [Consistent], [|Recent slope - Long-term slope| < 0.002],
     [Decelerating], [Recent slope < Long-term slope - 0.002],
     table.hline(),
   ),
-  caption: [Momentum Classification Criteria],
+  caption: [Recent Trend Classification Criteria],
 )
 
 The 0.002 NDVI/year threshold was selected to distinguish meaningful acceleration from noise while remaining sensitive to ecological change dynamics. This dual-timeframe approach helps identify recent shifts in land management or climate-driven vegetation responses.
 
 = Classification Taxonomy
 
-The system intersects absolute state (NDVI) with directional trend (Slope) to produce 9 mutually exclusive classes:
+The system intersects absolute state (NDVI) with directional trend (Slope) to produce 8 mutually exclusive classes. To ensure robustness against statistical noise, the classification prioritizes *State Change* (difference between start/end median NDVI) over linear trends. Linear trends are used as a secondary confirmation for subtle intra-class changes (e.g., Densification, Accumulation).
 
-== Trend-Driven Classes (> ±0.005/yr)
+== State-Driven Classes (Transition Logic)
 
 #figure(
   table(
@@ -227,15 +207,17 @@ The system intersects absolute state (NDVI) with directional trend (Slope) to pr
     align: left,
     table.header([*Class*], [*Definition*], [*Transition Logic*]),
     table.hline(),
-    [Canopy Establishment], [Sparse/Bare → Dense], [Crossed 0.6 threshold],
-    [Emerging Biomass], [Sparse → Trans (+Gain)], [Early recovery phase],
-    [Canopy Thickening], [Trans → Dense (+Gain)], [Maturation phase],
-    [Canopy Densification], [Dense → Dense (+Gain)], [Increasing biomass],
     [Canopy Loss], [Dense → Sparse/Bare], [State collapse],
-    [Canopy Thinning], [Dense → Trans (-Loss)], [Gradual degradation],
+    [Degradation], [Dense → Trans], [Biomass decline],
+    [Emerging Biomass], [Sparse → Trans], [Early recovery phase],
+    [Maturation], [Trans → Dense], [Full canopy closure],
+    [Establishment], [Sparse/Bare → Dense], [Rapid afforestation],
+    [Densification], [Dense → Dense (+Gain)], [Biomass increase (Trend-driven)],
+    [Transitional Accumulation], [Trans → Trans (+Gain)], [Intra-class growth (approaching Dense)],
+    [Sparse Accumulation], [Sparse → Sparse (+Gain)], [Intra-class growth (approaching Trans)],
     table.hline(),
   ),
-  caption: [Trend-Driven Classification Matrix],
+  caption: [Simplified Classification Matrix],
 )
 
 == Canopy Establishment Epochs
@@ -263,20 +245,17 @@ For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the spec
 
 The baseline period (1985–1989) is excluded from epoch tracking as it serves as the initial reference state. The 5-year interval balances temporal precision with data availability, ensuring sufficient cloud-free observations for robust NDVI composites within each epoch.
 
-== Stable/Edge Classes (< ±0.005/yr)
-
-Captures slow transitions often found at forest ecotones:
-- *Edge Expansion*: Sparse → Trans (Stable)
-- *Edge Colonization*: Trans → Dense (Stable)
-- *Edge Retreat*: Dense → Trans (Stable)
+// Edge classes removed in version 2.0.0 due to stable trend masking.
 
 = Limitations & Caveats
 
 Users must acknowledge the following limitations when interpreting results:
 
-1.  *Threshold Universality*: While the 0.6 threshold is a common reference for temperate/tropical forests (USGS, 2025), it should be treated as a starting point. Boreal or dryland forests may require lower thresholds (e.g., 0.5).
-2.  *Linearity Assumption*: The "Years to Dense Canopy" projection is a theoretical statement based on linear extrapolation. Ecological recovery is typically sigmoid/asymptotic. This projection does not account for carrying capacity saturation and should be interpreted as a mathematical trajectory rather than a biological prediction.
-3.  *Sensor Homogeneity*: Despite harmonization (Roy et al., 2016), minor spectral differences between Landsat generations may influence trend calculations in subtle ways.
+1.  *Threshold Universality*: While the >0.5 threshold for full vegetation is standard (Sobrino et al., 2004), our use of 0.6 is conservative. Optimal values vary by region, and boreal or dryland forests may require lower thresholds.
+2.  *Validation Status*: This methodology relies on theoretical biophysical thresholds. A quantitative accuracy assessment (confusion matrix) using stratified random sampling and high-resolution reference imagery (e.g., PlanetScope) is scheduled for the next phase to rigorously validate class precision.
+3.  *Linearity Assumption*: The "Years to Dense Canopy" projection is a theoretical statement based on linear extrapolation. Ecological recovery is typically sigmoid/asymptotic. This projection does not account for carrying capacity saturation.
+4.  *Sensor Homogeneity*: Despite Collection 2 inter-calibration (Crawford et al., 2023), minor spectral differences between Landsat generations may influence trend calculations in subtle ways.
+5.  *Projection Limits*: The "Years to Dense Canopy" layer is capped at 50 years (`clamp(0, 50)`) for visualization purposes. This artificial horizon should be considered when interpreting long-term recovery projections.
 
 = Code Availability
 
@@ -290,13 +269,15 @@ This implementation was developed using the Google Earth Engine JavaScript API v
 
 #set par(hanging-indent: 2em)
 
-Peng, Y., & Gong, H. (2025). Analysis of Spatiotemporal Changes in NDVI-Derived Vegetation Index and Its Influencing Factors in Kunming City (2000 to 2020). _Forests_, 16(12), 1781. https://doi.org/10.3390/f16121781
+Crawford, C. J., et al. (2023). The 50-year Landsat collection 2 archive. _Science of Remote Sensing_, 8, 100103. #link("https://doi.org/10.1016/j.srs.2023.100103")
+ 
+Peng, Y., & Gong, H. (2025). Analysis of Spatiotemporal Changes in NDVI-Derived Vegetation Index and Its Influencing Factors in Kunming City (2000 to 2020). _Forests_, 16(12), 1781. #link("https://doi.org/10.3390/f16121781")
+ 
+Pettorelli, N., Vik, J. O., Mysterud, A., Gaillard, J. M., Tucker, C. J., & Stenseth, N. C. (2005). Using the satellite-derived NDVI to assess ecological responses to environmental change. _Trends in Ecology & Evolution_, 20(9), 503–510. #link("https://doi.org/10.1016/j.tree.2005.05.011")
 
-Pettorelli, N., Vik, J. O., Mysterud, A., Gaillard, J. M., Tucker, C. J., & Stenseth, N. C. (2005). Using the satellite-derived NDVI to assess ecological responses to environmental change. _Trends in Ecology & Evolution_, 20(9), 503–510. https://doi.org/10.1016/j.tree.2005.05.011
 
-Roy, D. P., Kovalskyy, V., Zhang, H. K., Vermote, E. F., Yan, L., Kumar, S. S., & Egorov, A. (2016). Characterization of Landsat-7 to Landsat-8 reflective wavelength and normalized difference vegetation index continuity. _Remote Sensing of Environment_, 185, 57–70. https://doi.org/10.1016/j.rse.2015.12.024
 
-U.S. Geological Survey (USGS). (n.d.). _NDVI, the Foundation for Remote Sensing Phenology_. Retrieved December 5, 2025, from https://www.usgs.gov/special-topics/remote-sensing-phenology/science/ndvi-foundation-remote-sensing-phenology
+Sobrino, J. A., Jiménez-Muñoz, J. C., & Paolini, L. (2004). Land surface temperature retrieval from LANDSAT TM 5. _Remote Sensing of Environment_, 90(4), 434–440. #link("https://doi.org/10.1016/j.rse.2004.02.003")
 
 #v(1cm)
 #align(center)[

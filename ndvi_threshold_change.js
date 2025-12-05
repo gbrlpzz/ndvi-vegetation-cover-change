@@ -1,27 +1,26 @@
 // ============================================================================
 // VEGETATION COVER CHANGE DETECTION v2.0
-// 40-Year Landsat Analysis (1985-2025)
+// Multi-Decadal Landsat Collection 2 Analysis (Dynamic Configuration)
 // ============================================================================
 //
 // CLASSIFICATION TAXONOMY:
 // -------------------------
-// NDVI Thresholds:     Dense ≥0.6 | Trans 0.4-0.6 | Sparse 0.2-0.4 | Bare <0.2
+// NDVI Thresholds:     Dense ≥0.6* | Trans 0.4-0.6* | Sparse 0.2-0.4* | Bare <0.2*
+//                      (*Adjustable via SENSITIVITY_ADJUSTMENT)
 // Trend Thresholds:    Gaining >+0.005/yr | Losing <-0.005/yr | Stable ±0.005
+//                      (All trends filtered by Mann-Kendall Significance p < 0.05)
 //
-// CHANGE CLASSES (Strong Trend):
-//   1. Canopy Loss        - Dense → Sparse/Bare
-//   2. Canopy Thinning    - Dense → Trans (losing)
-//   3. Emerging Biomass   - Sparse → Trans (gaining)
-//   4. Canopy Thickening  - Trans → Dense (gaining)
-//   5. Canopy Densification - Dense → Dense (gaining)
-//   6. Canopy Establishment - Sparse → Dense (epoch tracked)
+// CHANGE CLASSES (State-Driven):
+//   1. Canopy Loss           - Dense → Sparse/Bare
+//   2. Degradation           - Dense → Trans
+//   3. Emerging Biomass      - Sparse → Trans
+//   4. Maturation            - Trans → Dense
+//   5. Canopy Densification  - Dense → Dense (gaining trend)
+//   6. Canopy Establishment  - Sparse → Dense (epoch tracked)
+//   7. Sparse Accumulation   - Sparse → Sparse (gaining trend)
+//   8. Trans. Accumulation   - Trans → Trans (gaining trend)
 //
-// EDGE CLASSES (Stable Trend):
-//   7. Edge Expansion     - Sparse → Trans
-//   8. Edge Colonization  - Trans → Dense
-//   9. Edge Retreat       - Dense → Trans
-//
-// See /docs/methodology.md for full documentation.
+// See /docs/methodology.pdf for full documentation.
 // ============================================================================
 
 // 1. CONFIGURATION
@@ -29,7 +28,7 @@
 // Time Series Parameters
 var startYear = 1985;
 var endYear = 2025; // Update this to extend analysis
-var recentYearStart = endYear - 10; // Dynamic 10-year momentum window
+var recentYearStart = endYear - 10; // Dynamic 10-year trend comparison window
 
 // SENSITIVITY ANALYSIS
 // Set to a value (e.g. ±0.05) to test threshold stability. Default 0.
@@ -45,14 +44,23 @@ var DENSE_CANOPY = 0.6 + SENSITIVITY_ADJUSTMENT;      // Dense forest canopy
 var TRANSITIONAL = 0.4 + SENSITIVITY_ADJUSTMENT;      // Transitional woodland-shrub
 var SPARSE = 0.2 + SENSITIVITY_ADJUSTMENT;            // Sparse vegetation / open land
 
-// Trend Thresholds (Source: MDPI Kunming study)
+// Trend Thresholds (Source: Peng & Gong, 2025)
 var GAINING_SLOPE = 0.005;   // Active biomass accumulation
 var LOSING_SLOPE = -0.005;   // Active biomass decline
 
 // Region of Interest
-var roi = roi || Map.getBounds(true);
-if (typeof roi === 'undefined' || roi === Map.getBounds(true)) {
-  print('⚠️ WARNING: using viewport bounds. For reproducible results, define a geometry.');
+// Region of Interest
+var roi = roi || null;
+if (typeof roi === 'undefined' || roi === null) {
+  // Default fallback if undefined
+  // Fallback: A known deforestation hotspot in Rondonia, Brazil
+  roi = ee.Geometry.Polygon([
+    [-63.0, -10.0], [-62.5, -10.0], [-62.5, -9.5], [-63.0, -9.5]
+  ]);
+  print('⚠️ WARNING: No ROI defined. Using default reproducible area (Rondonia, Brazil).');
+  Map.centerObject(roi, 10);
+} else {
+  Map.centerObject(roi);
 }
 
 // 2. DATA PROCESSING
@@ -61,7 +69,7 @@ function maskL57(image) {
   var qa = image.select('QA_PIXEL');
   var mask = qa.bitwiseAnd(1 << 3).eq(0).and(qa.bitwiseAnd(1 << 4).eq(0));
   return image.updateMask(mask)
-    .select(['SR_B4', 'SR_B3'], ['NIR', 'Red'])
+    .select(['SR_B3', 'SR_B4'], ['Red', 'NIR'])
     .multiply(0.0000275).add(-0.2)
     .set('system:time_start', image.get('system:time_start'));
 }
@@ -69,17 +77,10 @@ function maskL57(image) {
 function maskL89(image) {
   var qa = image.select('QA_PIXEL');
   var mask = qa.bitwiseAnd(1 << 3).eq(0).and(qa.bitwiseAnd(1 << 4).eq(0));
-  // Roy et al. (2016) Harmonization Coefficients (OLS)
-  // Aligns OLI (L8/9) to ETM+ (L7) spectral response
-  var slopes = ee.Image.constant([0.9785, 0.9548]); // Red, NIR
-  var intercepts = ee.Image.constant([-0.0095, 0.0068]); // Red, NIR
-
-  var harmonized = image.select(['SR_B4', 'SR_B5']) // Red, NIR
+  // USGS Collection 2 Level-2 Surface Reflectance is already inter-calibrated
+  // We strictly select and rename bands to ensure compatibility with L5/7 bands
+  return image.select(['SR_B4', 'SR_B5'], ['Red', 'NIR'])
     .multiply(0.0000275).add(-0.2) // Scale to reflectance
-    .multiply(slopes).add(intercepts); // Apply Roy et al. correction
-
-  return image.addBands(harmonized.rename(['Red', 'NIR']), null, true)
-    .select(['NIR', 'Red']) // Ensure only relevant bands are kept, matching maskL57
     .updateMask(mask)
     .set('system:time_start', image.get('system:time_start'));
 }
@@ -117,17 +118,33 @@ var endClass = classifyNDVI(endNDVI);
 
 // 4. TREND ANALYSIS (Full period)
 
+// 4. TREND ANALYSIS (Full period) with Statistical Significance
+
 var trendCollection = fullCollection.filterDate(startYear + '-01-01', endYear + '-12-31')
   .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
   .map(function (img) {
-    var ndvi = img.normalizedDifference(['NIR', 'Red']).rename('NDVI');
-    var t = ee.Image.constant(img.get('system:time_start')).divide(31536000000).float().rename('t');
-    return ndvi.addBands(t);
+    return img.normalizedDifference(['NIR', 'Red']).rename('NDVI')
+      .set('system:time_start', img.get('system:time_start'));
   });
 
-var linearFit = trendCollection.select(['t', 'NDVI']).reduce(ee.Reducer.linearFit());
+// 1. Linear Slope (Magnitude of change)
+var linearFit = trendCollection.select(['NDVI'])
+  .map(function (img) {
+    var t = ee.Image.constant(img.get('system:time_start')).divide(31536000000).float();
+    return img.addBands(t.rename('t'));
+  })
+  .select(['t', 'NDVI'])
+  .reduce(ee.Reducer.linearFit());
+
 var slope = linearFit.select('scale');
-var intercept = linearFit.select('offset');
+
+// 2. Statistical Significance (Kendall's Tau)
+// Non-parametric test robust to noise and non-normality
+var kendall = trendCollection.select('NDVI') // Reducer assumes time series input
+  .reduce(ee.Reducer.kendallsCorrelation());
+
+var pValue = kendall.select('NDVI_p-value');
+var SIGNIFICANCE_LEVEL = 0.05; // 95% Confidence
 
 // Recent Trend (Dynamic)
 var recentTrendCollection = fullCollection.filterDate(recentYearStart + '-01-01', endYear + '-12-31')
@@ -142,58 +159,61 @@ var recentFit = recentTrendCollection.select(['t', 'NDVI']).reduce(ee.Reducer.li
 var recentSlope = recentFit.select('scale').rename('recent_slope');
 
 // Trend class: 1=Gaining, 2=Stable, 3=Losing
-var trendClass = ee.Image(2)
-  .where(slope.gt(GAINING_SLOPE), 1)
-  .where(slope.lt(LOSING_SLOPE), 3);
+// MASKED by statistical significance (p < 0.05)
+var significantTrend = pValue.lt(SIGNIFICANCE_LEVEL);
 
-// 5. CHANGE CLASSIFICATION (Neutral Terminology)
-// 1 = Canopy Loss (Dense → Sparse/Bare)
-// 2 = Canopy Thinning (Dense → Transitional + Losing)
-// 3 = Emerging Biomass (Sparse → Transitional + Gaining)
-// 4 = Canopy Thickening (Transitional → Dense + Gaining)
+var trendClass = ee.Image(2) // Default to Stable
+  .where(slope.gt(GAINING_SLOPE).and(significantTrend), 1)
+  .where(slope.lt(LOSING_SLOPE).and(significantTrend), 3);
+
+// 5. CHANGE CLASSIFICATION (Simplified Taxonomy)
+// Primarily driven by State Change (Robust Median Comparison)
+// Trend Analysis used only for intra-class dynamics (Densification)
+
+// 1 = Canopy Loss        (Dense → Sparse/Bare)
+// 2 = Degradation        (Dense → Transitional)
+// 3 = Emerging Biomass   (Sparse → Transitional)
+// 4 = Maturation         (Transitional → Dense)
 // 5 = Canopy Densification (Dense → Dense + Gaining)
-// 6 = Canopy Establishment (Sparse/Bare → Dense, tracked by epoch)
+// 6 = Canopy Establishment (Sparse/Bare → Dense)
+// 7 = Sparse Accumulation       (Sparse → Sparse + Gaining)
+// 8 = Transitional Accumulation (Trans → Trans + Gaining)
 
 var changeClass = ee.Image(0);
 
-// Canopy Loss: Dense (1) → Sparse (3) or Bare (4)
+// 1. Canopy Loss
 changeClass = changeClass.where(
   startClass.eq(1).and(endClass.gte(3)), 1);
 
-// Canopy Thinning: Dense (1) → Transitional (2) + Losing
+// 2. Degradation (formerly Thinning/Edge Retreat)
 changeClass = changeClass.where(
-  startClass.eq(1).and(endClass.eq(2)).and(trendClass.eq(3)), 2);
+  startClass.eq(1).and(endClass.eq(2)), 2);
 
-// Emerging Biomass: Sparse (3) → Transitional (2) + Gaining
+// 3. Emerging Biomass (formerly Emerging/Edge Expansion)
 changeClass = changeClass.where(
-  startClass.eq(3).and(endClass.eq(2)).and(trendClass.eq(1)), 3);
+  startClass.eq(3).and(endClass.eq(2)), 3);
 
-// Canopy Thickening: Transitional (2) → Dense (1) + Gaining
+// 4. Maturation (formerly Thickening/Edge Colonization)
 changeClass = changeClass.where(
-  startClass.eq(2).and(endClass.eq(1)).and(trendClass.eq(1)), 4);
+  startClass.eq(2).and(endClass.eq(1)), 4);
 
-// Canopy Densification: Dense (1) → Dense (1) + Gaining
+// 5. Canopy Densification
+// Requires stable Dense state AND significant gaining trend
 changeClass = changeClass.where(
   startClass.eq(1).and(endClass.eq(1)).and(trendClass.eq(1)), 5);
 
-// Canopy Establishment: Sparse/Bare → Dense
+// 6. Canopy Establishment
 var establishmentMask = startClass.gte(3).and(endClass.eq(1));
 changeClass = changeClass.where(establishmentMask, 6);
 
-// EDGE EXPANSION CLASSES (state transitions with stable trend)
-// These capture gradual edge expansion without strong directional trend
+// 7. Sparse Accumulation (Sparse → Sparse + Gaining)
+var sparseStable = startClass.eq(3).and(endClass.eq(3));
+var isGaining = trendClass.eq(1).or(recentSlope.gt(GAINING_SLOPE));
+changeClass = changeClass.where(sparseStable.and(isGaining), 7);
 
-// Edge Expansion: Sparse (3) → Transitional (2) + Stable (not already flagged as Emerging)
-changeClass = changeClass.where(
-  startClass.eq(3).and(endClass.eq(2)).and(changeClass.eq(0)), 7);
-
-// Edge Colonization: Transitional (2) → Dense (1) + Stable (not already flagged)
-changeClass = changeClass.where(
-  startClass.eq(2).and(endClass.eq(1)).and(changeClass.eq(0)), 8);
-
-// Edge Retreat: Dense (1) → Transitional (2) + Stable (not thinning with losing trend)
-changeClass = changeClass.where(
-  startClass.eq(1).and(endClass.eq(2)).and(changeClass.eq(0)), 9);
+// 8. Transitional Accumulation (Trans → Trans + Gaining)
+var transStable = startClass.eq(2).and(endClass.eq(2));
+changeClass = changeClass.where(transStable.and(isGaining), 8);
 
 changeClass = changeClass.rename('change_class');
 
@@ -201,10 +221,22 @@ changeClass = changeClass.rename('change_class');
 
 var epochs = [];
 // Generate 5-year epochs starting from startYear + 5 (since first 5 are baseline)
-for (var y = startYear + 5; y <= endYear; y += 5) {
-  // Ensure the last epoch matches endYear
-  var eEnd = Math.min(y + 4, endYear);
-  epochs.push({ start: y, end: eEnd, label: y });
+// Generate 5-year epochs starting from startYear + 5
+// Logic: If the remaining tail is small (< 3 years), merge it into the final epoch
+// to avoid orphan 1-year epochs (e.g., 2020-2025 implies a 6-year final bin).
+for (var y = startYear + 5; y <= endYear;) {
+  var nextStart = y + 5;
+  var yearsRemaining = endYear - nextStart + 1;
+
+  if (yearsRemaining < 3) {
+    // Merge remainder into this epoch and finish
+    epochs.push({ start: y, end: endYear, label: y });
+    break;
+  } else {
+    // Standard 5-year bin
+    epochs.push({ start: y, end: y + 4, label: y });
+    y += 5;
+  }
 }
 
 var epochCollection = ee.ImageCollection.fromImages(
@@ -224,6 +256,8 @@ var establishmentEpoch = epochCollection.min().updateMask(establishmentMask);
 // 7. TRAJECTORY PROJECTION (Sigmoid-based)
 // For gaining areas, project years to reach dense canopy threshold
 // Using linear extrapolation: years = (threshold - currentNDVI) / slope
+// LIMITATION: Capped at 50 years to avoid unrealistic ecological recovery times
+
 
 var yearsToThreshold = endNDVI.subtract(DENSE_CANOPY).abs()
   .divide(slope.abs())
@@ -240,20 +274,30 @@ var yearsToCanopy = yearsToThreshold.updateMask(projectionMask);
 
 Map.centerObject(roi);
 
-// Main change layer
+// Define names for 6 simplified classes
+var classNames = {
+  1: 'Canopy Loss',
+  2: 'Degradation',
+  3: 'Emerging Biomass',
+  4: 'Maturation',
+  5: 'Densification',
+  6: 'Establishment',
+  7: 'Sparse Accumulation',
+  8: 'Transitional Accumulation'
+};
+
 var changeViz = {
   min: 1,
-  max: 9,
+  max: 8,
   palette: [
-    'FF00FF', // 1: Canopy Loss (Magenta)
-    'FFA500', // 2: Canopy Thinning (Orange)
-    'ADFF2F', // 3: Emerging Biomass (Lime)
-    '90EE90', // 4: Canopy Thickening (Light Green)
-    '006400', // 5: Canopy Densification (Dark Green)
-    '0000FF', // 6: Canopy Establishment (Blue)
-    'FFFF00', // 7: Edge Expansion (Yellow)
-    '00CED1', // 8: Edge Colonization (Turquoise)
-    'DDA0DD'  // 9: Edge Retreat (Plum)
+    'D7191C', // 1. Loss (Deep Carmine)
+    'FDAE61', // 2. Degradation (Soft Orange)
+    'A6D96A', // 3. Emerging (Yellow-Green)
+    '008837', // 4. Maturation (Solid Green)
+    '00441B', // 5. Densification (Deep Green)
+    '2C7BB6', // 6. Establishment (Medium Blue)
+    'D9F0D3', // 7. Sparse Accumulation (Pale Green)
+    '74C476'  // 8. Transitional Accumul. (Soft Green)
   ]
 };
 Map.addLayer(changeClass.updateMask(changeClass.gt(0)), changeViz, 'Vegetation Change');
@@ -274,6 +318,27 @@ var projViz = {
   palette: ['00FF00', 'FFFF00', 'FF0000'] // Green (soon) to Red (distant)
 };
 Map.addLayer(yearsToCanopy, projViz, 'Years to Dense Canopy (Theoretical)', false);
+
+// 8b. SUPPLEMENTARY DATA LAYERS (User Requested)
+
+// Statistical Trend Class (All vegetation types)
+// Shows significant trends (p < 0.05) even in Sparse/Transitional areas
+var trendViz = {
+  min: 1,
+  max: 3,
+  palette: ['228B22', 'CCCCCC', 'FF0000'] // 1:Gain(Green), 2:Stable(Grey), 3:Loss(Red)
+};
+// Mask out non-significant pixels for cleaner visualization
+var significantTrendLayer = trendClass.updateMask(significantTrend);
+Map.addLayer(significantTrendLayer, trendViz, 'Statistical Trends (All Classes)', false);
+
+// Trend Magnitude (Slope)
+var slopeViz = {
+  min: -0.015,
+  max: 0.015,
+  palette: ['a50026', 'd73027', 'f46d43', 'fdae61', 'fee08b', 'ffffbf', 'd9ef8b', 'a6d96a', '66bd63', '1a9850', '006837']
+};
+Map.addLayer(slope.updateMask(significantTrend), slopeViz, 'Trend Magnitude (Slope)', false);
 
 // DYNAMIC LEGEND - Updates based on visible layer
 var legend = ui.Panel({
@@ -320,7 +385,33 @@ function updateLegend(layerName) {
     legend.add(makeRow('7FFF00', '5-10 years', ''));
     legend.add(makeRow('FFFF00', '10-20 years', ''));
     legend.add(makeRow('FF7F00', '20-30 years', ''));
+    legend.add(makeRow('FF7F00', '20-30 years', ''));
     legend.add(makeRow('FF0000', '>30 years', 'Distant'));
+
+  } else if (layerName === 'Statistical Trends (All Classes)') {
+    // Trend legend
+    legend.add(ui.Label({ value: 'Statistical Trends (MK Test)', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
+    legend.add(ui.Label({ value: 'Significant trends (p < 0.05) across all strata', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
+    legend.add(makeRow('228B22', 'Gaining', '> +0.005 NDVI/yr'));
+    legend.add(makeRow('FF0000', 'Losing', '< -0.005 NDVI/yr'));
+    legend.add(makeRow('CCCCCC', 'Stable', 'No sig. trend or low slope'));
+
+  } else if (layerName === 'Trend Magnitude (Slope)') {
+    legend.add(ui.Label({ value: 'Trend Magnitude', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
+    legend.add(ui.Label({ value: 'Slope of significant linear trends', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
+    // Simple gradient representation
+    var gradient = ui.Panel({
+      style: {
+        width: '200px', height: '20px', margin: '0 0 10px 0',
+        backgroundImage: 'linear-gradient(to right, #a50026, #ffffbf, #006837)'
+      }
+    });
+    var labels = ui.Panel({
+      widgets: [ui.Label('-0.015', { margin: '0', fontSize: '10px' }), ui.Label('0', { margin: '0 auto', fontSize: '10px' }), ui.Label('+0.015', { margin: '0', fontSize: '10px' })],
+      layout: ui.Panel.Layout.Flow('horizontal'), style: { width: '200px' }
+    });
+    legend.add(gradient);
+    legend.add(labels);
 
   } else {
     // Default: Vegetation Change legend
@@ -328,18 +419,17 @@ function updateLegend(layerName) {
     var duration = endYear - startYear;
     legend.add(ui.Label({ value: duration + '-Year Analysis (' + startYear + '-' + endYear + ')', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
 
-    legend.add(ui.Label({ value: 'With Strong Trend (>±' + GAINING_SLOPE + '/yr)', style: { fontSize: '9px', color: '666666', margin: '0 0 4px 0' } }));
-    legend.add(makeRow('FF00FF', 'Canopy Loss', 'Dense → Sparse/Bare'));
-    legend.add(makeRow('FFA500', 'Canopy Thinning', 'Dense → Trans (losing)'));
-    legend.add(makeRow('ADFF2F', 'Emerging Biomass', 'Sparse → Trans (gaining)'));
-    legend.add(makeRow('90EE90', 'Canopy Thickening', 'Trans → Dense (gaining)'));
-    legend.add(makeRow('006400', 'Canopy Densification', 'Dense → Dense (gaining)'));
-    legend.add(makeRow('0000FF', 'Canopy Establishment', 'Sparse → Dense'));
+    legend.add(ui.Label({ value: 'State Transitions (Robust)', style: { fontSize: '9px', color: '666666', margin: '0 0 4px 0' } }));
+    legend.add(makeRow('D7191C', 'Canopy Loss', 'Dense → Sparse/Bare'));
+    legend.add(makeRow('FDAE61', 'Degradation', 'Dense → Transitional'));
+    legend.add(makeRow('A6D96A', 'Emerging Biomass', 'Sparse → Transitional'));
+    legend.add(makeRow('008837', 'Maturation', 'Transitional → Dense'));
+    legend.add(makeRow('2C7BB6', 'Establishment', 'Sparse → Dense'));
 
-    legend.add(ui.Label({ value: 'With Stable Trend (<±' + GAINING_SLOPE + '/yr)', style: { fontSize: '9px', color: '666666', margin: '8px 0 4px 0' } }));
-    legend.add(makeRow('FFFF00', 'Edge Expansion', 'Sparse → Trans'));
-    legend.add(makeRow('00CED1', 'Edge Colonization', 'Trans → Dense'));
-    legend.add(makeRow('DDA0DD', 'Edge Retreat', 'Dense → Trans'));
+    legend.add(ui.Label({ value: 'Trend Confirmed', style: { fontSize: '9px', color: '666666', margin: '8px 0 4px 0' } }));
+    legend.add(makeRow('00441B', 'Densification', 'Dense → Dense (+Gain)'));
+    legend.add(makeRow('74C476', 'Trans. Accumulation', 'Trans → Trans (+Gain)'));
+    legend.add(makeRow('D9F0D3', 'Sparse Accumulation', 'Sparse → Sparse (+Gain)'));
 
     var footerPanel = ui.Panel({ style: { margin: '10px 0 0 0', padding: '8px 0 0 0' } });
     footerPanel.add(ui.Label({ value: 'Dense ≥' + DENSE_CANOPY + ' | Trans ' + TRANSITIONAL + '-' + DENSE_CANOPY + ' | Sparse ' + SPARSE + '-' + TRANSITIONAL, style: { fontSize: '9px', color: '888888' } }));
@@ -365,17 +455,7 @@ var inspectorPanel = ui.Panel({
 Map.add(inspectorPanel);
 
 // Lookup tables for labels
-var classNames = {
-  1: 'Canopy Loss',
-  2: 'Canopy Thinning',
-  3: 'Emerging Biomass',
-  4: 'Canopy Thickening',
-  5: 'Canopy Densification',
-  6: 'Canopy Establishment',
-  7: 'Edge Expansion',
-  8: 'Edge Colonization',
-  9: 'Edge Retreat'
-};
+// classNames is already defined above
 var vegNames = { 1: 'Dense Canopy', 2: 'Transitional', 3: 'Sparse', 4: 'Bare' };
 var trendNames = { 1: 'Gaining', 2: 'Stable', 3: 'Losing' };
 
@@ -409,6 +489,7 @@ function updateInspector(coords) {
     endClass.rename('end_class'),
     trendClass.rename('trend_class'),
     slope.rename('slope'),
+    pValue.rename('p_value'),
     recentSlope,
     endNDVI.rename('current_ndvi'),
     establishmentEpoch.rename('epoch'),
@@ -430,12 +511,17 @@ function updateInspector(coords) {
           geometry: point,
           scale: 30
         }).get('nd'),
-        'system:time_start': image.get('system:time_start')
+        'system:time_start': img.get('system:time_start')
       });
     });
 
   values.evaluate(function (res) {
     inspectorPanel.clear();
+
+    if (!res) {
+      inspectorPanel.add(ui.Label('No data available (masked or outside bounds)', { fontSize: '11px', color: 'gray' }));
+      return;
+    }
 
     // Header with close button
     var header = ui.Panel({
@@ -484,19 +570,19 @@ function updateInspector(coords) {
     var recentClass = recentSlopeVal > GAINING_SLOPE ? 'Gaining' : (recentSlopeVal < LOSING_SLOPE ? 'Losing' : 'Stable');
     var recentColor = recentSlopeVal > GAINING_SLOPE ? '228B22' : (recentSlopeVal < LOSING_SLOPE ? 'CC0000' : '888888');
 
-    // Determine momentum
-    var momentum = '';
-    var momentumColor = '888888';
-    var MOMENTUM_THRESHOLD = 0.002;
-    if (Math.abs(recentSlopeVal - slopeVal) < MOMENTUM_THRESHOLD) {
-      momentum = '→ Consistent';
-      momentumColor = '666666';
-    } else if (recentSlopeVal > slopeVal + MOMENTUM_THRESHOLD) {
-      momentum = '↑ Accelerating';
-      momentumColor = '228B22';
+    // Determine trend acceleration
+    var trendAccel = '';
+    var trendAccelColor = '888888';
+    var ACCEL_THRESHOLD = 0.002;
+    if (Math.abs(recentSlopeVal - slopeVal) < ACCEL_THRESHOLD) {
+      trendAccel = '→ Consistent';
+      trendAccelColor = '666666';
+    } else if (recentSlopeVal > slopeVal + ACCEL_THRESHOLD) {
+      trendAccel = '↑ Accelerating';
+      trendAccelColor = '228B22';
     } else {
-      momentum = '↓ Decelerating';
-      momentumColor = 'CC6600';
+      trendAccel = '↓ Decelerating';
+      trendAccelColor = 'CC6600';
     }
 
     inspectorPanel.add(ui.Label('Trend Analysis', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
@@ -514,6 +600,12 @@ function updateInspector(coords) {
     });
     inspectorPanel.add(trend40Panel);
 
+    var pVal = res.p_value || 1.0;
+    var sigLabel = pVal < 0.05 ? 'Significant (p<0.05)' : 'Not Significant (p≥0.05)';
+    var sigColor = pVal < 0.05 ? '228B22' : '888888';
+
+    inspectorPanel.add(ui.Label(sigLabel, { fontSize: '9px', color: sigColor, margin: '0 0 4px 0', fontStyle: 'italic' }));
+
     // Recent row
     var trend10Panel = ui.Panel({
       widgets: [
@@ -526,9 +618,9 @@ function updateInspector(coords) {
     });
     inspectorPanel.add(trend10Panel);
 
-    // Momentum indicator
-    inspectorPanel.add(ui.Label(momentum, {
-      fontSize: '10px', color: momentumColor, fontStyle: 'italic', margin: '0 0 8px 0'
+    // Trend Acceleration
+    inspectorPanel.add(ui.Label(trendAccel, {
+      fontSize: '10px', color: trendAccelColor, fontStyle: 'italic', margin: '0 0 8px 0'
     }));
 
     // State transition
@@ -541,15 +633,16 @@ function updateInspector(coords) {
     // Change classification
     inspectorPanel.add(ui.Label('Classification Result', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
     if (res.change_class && res.change_class > 0) {
-      var changeColors = ['FF00FF', 'FFA500', '7CFC00', '90EE90', '006400', '0000FF', 'FFFF00', '00CED1', 'DDA0DD'];
+      var changeColors = ['D7191C', 'FDAE61', 'A6D96A', '008837', '00441B', '2C7BB6', 'D9F0D3', '74C476'];
       var changeColor = changeColors[res.change_class - 1] || 'CCCCCC';
-      var lightTextClasses = [3, 4, 7];
+      var lightTextClasses = [3, 7];
       var changePanel = ui.Panel({
         style: { backgroundColor: '#' + changeColor, padding: '6px 10px', margin: '0 0 4px 0' }
       });
       changePanel.add(ui.Label(classNames[res.change_class] || 'Unknown', {
         fontWeight: 'bold', fontSize: '12px',
-        color: lightTextClasses.indexOf(res.change_class) >= 0 ? '000000' : 'FFFFFF'
+        color: lightTextClasses.indexOf(res.change_class) >= 0 ? '000000' : 'FFFFFF',
+        backgroundColor: '#' + changeColor
       }));
       inspectorPanel.add(changePanel);
     } else {
@@ -701,6 +794,24 @@ Export.image.toDrive({
 Export.image.toDrive({
   image: establishmentEpoch.unmask(0).short(),
   description: 'Export_Establishment_Epoch_' + startYear + '_' + endYear,
+  scale: 30,
+  region: roi,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+Export.image.toDrive({
+  image: slope.float(),
+  description: 'Export_Trend_Slope_' + startYear + '_' + endYear,
+  scale: 30,
+  region: roi,
+  crs: 'EPSG:4326',
+  maxPixels: 1e13
+});
+
+Export.image.toDrive({
+  image: trendClass.byte(),
+  description: 'Export_Statistical_Trend_Class_' + startYear + '_' + endYear,
   scale: 30,
   region: roi,
   crs: 'EPSG:4326',
