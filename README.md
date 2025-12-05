@@ -44,8 +44,9 @@ A Google Earth Engine script for detecting multi-decadal vegetation change using
 ## Limitations
 
 - **Thresholds are approximate**: Optimal values vary by region and ecosystem
-- **Linear trend assumption**: Vegetation change is often nonlinear
-- **Validation Pending**: Quantitative accuracy assessment is planned for the next release.
+- **Linearity Assumption**: The "Years to Dense Canopy" projection is a theoretical signal, not an ecological prediction.
+- **Validation Status (Visual Only)**: This tool is experimental. Accuracy has been assessed visually but not quantitatively.
+- **Sensor Homogeneity**: Minor spectral differences (TM vs OLI) are uncorrected but deemed acceptable for Collection 2.
 - **30m resolution**: May not capture fine-scale patterns
 
 See [docs/methodology.pdf](docs/methodology.pdf) for documentation, limitations, and references.

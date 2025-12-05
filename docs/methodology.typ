@@ -54,7 +54,7 @@
 
 = Abstract
 
-This document details the scientific methodology for detecting multi-decadal vegetation cover change using harmonized Landsat time series. The classification system employs NDVI (Normalized Difference Vegetation Index) thresholds derived from USGS reference values and linear trend analysis parameters adapted from peer-reviewed literature (e.g., Peng & Gong, 2025). The implementation allows for dynamic temporal configuration and sensitivity analysis to adapt to different biomes.
+This document details the scientific methodology for detecting multi-decadal vegetation cover change using inter-calibrated Landsat time series. The classification system employs NDVI (Normalized Difference Vegetation Index) thresholds derived from USGS reference values and linear trend analysis parameters adapted from peer-reviewed literature (e.g., Peng & Gong, 2025). The implementation allows for dynamic temporal configuration and sensitivity analysis to adapt to different biomes.
 
 = Introduction
 
@@ -90,7 +90,9 @@ Only clear observations are retained for NDVI calculation, ensuring temporal com
 
 == Spectral Harmonization
 
-Landsat 8/9 OLI spectral bands are natively compatible with Landsat 5/7 TM/ETM+ for vegetation analysis when using USGS Collection 2 Level-2 Surface Reflectance data. As confirmed by USGS calibration documents and Crawford et al. (2023), the geometric and radiometric improvements in Collection 2 render post-hoc OLS harmonization unnecessary for most monitoring applications.
+Landsat 8/9 OLI spectral bands are natively compatible with Landsat 5/7 TM/ETM+ for vegetation analysis when using USGS Collection 2 Level-2 Surface Reflectance data. *Crawford et al. (2023)* demonstrate that the geometric and radiometric improvements in Collection 2 significantly reduce the need for post-hoc OLS harmonization (e.g., Roy et al., 2016) for general monitoring applications.
+
+*Design Decision:* This methodology relies directly on USGS Collection 2 Level-2 inter-calibration. We acknowledge minor spectral response differences between sensors (OLI vs TM/ETM+) as a known uncertainty, but prioritize the preservation of original radiometric data over the introduction of potential transformation artifacts.
 
 *Processing Protocol:*
 - *Landsat 5 & 7*: Bands B3 (Red) and B4 (NIR).
@@ -252,9 +254,9 @@ The baseline period (1985–1989) is excluded from epoch tracking as it serves a
 Users must acknowledge the following limitations when interpreting results:
 
 1.  *Threshold Universality*: While the >0.5 threshold for full vegetation is standard (Sobrino et al., 2004), our use of 0.6 is conservative. Optimal values vary by region, and boreal or dryland forests may require lower thresholds.
-2.  *Validation Status*: This methodology relies on theoretical biophysical thresholds. A quantitative accuracy assessment (confusion matrix) using stratified random sampling and high-resolution reference imagery (e.g., PlanetScope) is scheduled for the next phase to rigorously validate class precision.
-3.  *Linearity Assumption*: The "Years to Dense Canopy" projection is a theoretical statement based on linear extrapolation. Ecological recovery is typically sigmoid/asymptotic. This projection does not account for carrying capacity saturation.
-4.  *Sensor Homogeneity*: Despite Collection 2 inter-calibration (Crawford et al., 2023), minor spectral differences between Landsat generations may influence trend calculations in subtle ways.
+2.  *Validation Status (Visual Only)*: This methodology has undergone *preliminary visual validation* by the authors in select test sites. It has *NOT* been rigorously validated with a quantitative accuracy assessment (confusion matrix). Users should treat the output as experimental indices rather than ground-truth maps until further validation is published.
+3.  *Linearity Assumption*: The "Years to Dense Canopy" projection is a *theoretical linear model* (`(Threshold - Current) / RecentSlope`). It projects the *current 10-year trend* forward. Ecological recovery is typically sigmoid/asymptotic. This projection likely underestimates recovery time for young stands (slow start) and typically fails to account for carrying capacity saturation in mature stands.
+4.  *Sensor Homogeneity*: Despite Collection 2 inter-calibration (Crawford et al., 2023), minor spectral differences between Landsat generations (TM/ETM+ vs OLI) may persist. We assume these are negligible for broad degradation classes, but they may influence subtle trend detection across the 2012/2013 sensor transition.
 5.  *Projection Limits*: The "Years to Dense Canopy" layer is capped at 50 years (`clamp(0, 50)`) for visualization purposes. This artificial horizon should be considered when interpreting long-term recovery projections.
 
 = Code Availability

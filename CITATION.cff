@@ -10,6 +10,7 @@ authors:
     email: info@gabrielepizzi.com
 repository-code: "https://github.com/gbrlpzz/ndvi-vegetation-cover-change"
 url: "https://github.com/gbrlpzz/ndvi-vegetation-cover-change"
+abstract: >-
   A Google Earth Engine script for detecting multi-decadal vegetation change
   using Landsat Collection 2 time series. Implements 8-class change detection
   based on dynamic NDVI thresholds, Mann-Kendall trend significance testing,

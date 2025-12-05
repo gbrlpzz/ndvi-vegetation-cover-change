@@ -35,7 +35,7 @@ var recentYearStart = endYear - 10; // Dynamic 10-year trend comparison window
 var SENSITIVITY_ADJUSTMENT = 0.0;
 
 // Seasonality Parameters (Months 1-12)
-// Default: June (6) to Sept (9) for Northern Hemisphere Summer
+// Default: June (6) to Sept (9) (Seasonal Window - Configurable)
 var START_MONTH = 6;
 var END_MONTH = 9;
 
@@ -93,7 +93,9 @@ var fullCollection = l5.merge(l7).merge(l8).merge(l9);
 
 // 3. COMPUTE NDVI STATES
 
-function getSummerNDVI(startDate, endDate) {
+// 94. COMPUTE NDVI STATES
+// 95. 
+function getSeasonalComposite(startDate, endDate) {
   return fullCollection.filterDate(startDate, endDate)
     .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
     .median()
@@ -102,8 +104,10 @@ function getSummerNDVI(startDate, endDate) {
 
 // Baseline (startYear to startYear+4) and Current (endYear-4 to endYear) states
 // Using 5-year averages for stable state definition
-var startNDVI = getSummerNDVI(startYear + '-01-01', (startYear + 4) + '-12-31');
-var endNDVI = getSummerNDVI((endYear - 4) + '-01-01', endYear + '-12-31');
+// Baseline (startYear to startYear+4) and Current (endYear-4 to endYear) states
+// Using 5-year averages for stable state definition
+var startNDVI = getSeasonalComposite(startYear + '-01-01', (startYear + 4) + '-12-31');
+var endNDVI = getSeasonalComposite((endYear - 4) + '-01-01', endYear + '-12-31');
 
 // Vegetation class: 1=Dense, 2=Transitional, 3=Sparse, 4=Bare
 function classifyNDVI(ndvi) {
@@ -130,6 +134,8 @@ var trendCollection = fullCollection.filterDate(startYear + '-01-01', endYear + 
 // 1. Linear Slope (Magnitude of change)
 var linearFit = trendCollection.select(['NDVI'])
   .map(function (img) {
+    // Note: Divide by 31536000000 (365 days) is an approximation. 
+    // For scientific precision with leap years, consider: img.date().get('year').add(img.date().getFraction('year'))
     var t = ee.Image.constant(img.get('system:time_start')).divide(31536000000).float();
     return img.addBands(t.rename('t'));
   })
@@ -241,7 +247,7 @@ for (var y = startYear + 5; y <= endYear;) {
 
 var epochCollection = ee.ImageCollection.fromImages(
   epochs.map(function (epoch) {
-    var img = getSummerNDVI(epoch.start + '-01-01', epoch.end + '-12-31');
+    var img = getSeasonalComposite(epoch.start + '-01-01', epoch.end + '-12-31');
     return img.gte(DENSE_CANOPY)
       .multiply(epoch.label)
       .selfMask()
@@ -260,8 +266,8 @@ var establishmentEpoch = epochCollection.min().updateMask(establishmentMask);
 
 
 var yearsToThreshold = endNDVI.subtract(DENSE_CANOPY).abs()
-  .divide(slope.abs())
-  .where(slope.lte(0), 9999)  // No projection for non-gaining
+  .divide(recentSlope.abs())
+  .where(recentSlope.lte(0), 9999)  // No projection for non-gaining
   .where(endNDVI.gte(DENSE_CANOPY), 0)  // Already at threshold
   .clamp(0, 50)
   .rename('years_to_canopy');
@@ -380,7 +386,7 @@ function updateLegend(layerName) {
   } else if (layerName === 'Years to Dense Canopy (Theoretical)') {
     // Projection legend
     legend.add(ui.Label({ value: 'Years to Dense Canopy', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
-    legend.add(ui.Label({ value: 'Theoretical linear projection', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
+    legend.add(ui.Label({ value: 'Theoretical Linear Projection', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
     legend.add(makeRow('00FF00', '0-5 years', 'Imminent'));
     legend.add(makeRow('7FFF00', '5-10 years', ''));
     legend.add(makeRow('FFFF00', '10-20 years', ''));
@@ -691,17 +697,17 @@ function updateInspector(coords) {
       }));
     } else if (slopeVal > 0) {
       // Gaining
-      var yearsNeeded = (DENSE_CANOPY - currentNDVI) / slopeVal;
+      var yearsNeeded = (DENSE_CANOPY - currentNDVI) / recentSlopeVal;
       if (yearsNeeded <= 0) {
         statusPanel.add(ui.Label('✓ At threshold', {
           fontSize: '11px', color: '228B22', fontWeight: 'bold'
         }));
       } else if (yearsNeeded <= 50) {
         var projYear = endYear + Math.round(yearsNeeded);
-        statusPanel.add(ui.Label('↗ Projected: ~' + projYear, {
+        statusPanel.add(ui.Label('↗ Projected: ~' + projYear + ' (Theoretical)', {
           fontSize: '11px', color: '0066CC', fontWeight: 'bold'
         }));
-        statusPanel.add(ui.Label('Est. ' + Math.round(yearsNeeded) + ' years to reach NDVI ≥' + DENSE_CANOPY, {
+        statusPanel.add(ui.Label('Est. ' + Math.round(yearsNeeded) + ' years (Linear Model)', {
           fontSize: '9px', color: '666666', fontStyle: 'italic'
         }));
       } else {
