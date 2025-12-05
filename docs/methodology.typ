@@ -46,7 +46,7 @@
   #v(1fr)
   #text(size: 10pt, fill: gray)[
     © 2025 Gabriele Pizzi. All rights reserved.\
-    Version 2.2
+    Version 2.0.0
   ]
 ]
 
@@ -75,6 +75,17 @@ Collection 2, Level-2 Surface Reflectance data from USGS:
 - Landsat 8 OLI (2013–2025)
 - Landsat 9 OLI-2 (2021–2025)
 
+All imagery is processed at native 30-meter spatial resolution.
+
+== Quality Masking
+
+Cloud and cloud shadow contamination is removed using the QA_PIXEL quality assessment band following USGS Collection 2 specifications:
+
+- Bit 3 (Cloud) = 0 (clear sky)
+- Bit 4 (Cloud Shadow) = 0 (no shadow)
+
+Only clear observations are retained for NDVI calculation, ensuring temporal composites represent actual vegetation conditions rather than atmospheric artifacts.
+
 == Harmonization
 
 == Spectral Harmonization
@@ -98,7 +109,7 @@ Landsat 8/9 OLI spectral response differs from Landsat 5/7 TM/ETM+. Following Ro
 
 *Harmonization Protocol:*
 - *Landsat 5 & 7*: Treated as spectrally compatible (no transformation).
-- *Landsat 8 & 9*: Transformed using $"L7"_("eq") = m dot "L8" + c$.
+- *Landsat 8 & 9*: Transformed using $"L7"_("eq") = m times "L8" + c$.
 
 This correction reduces cross-sensor discontinuities that could otherwise be misinterpreted as vegetation trends.
 
@@ -127,10 +138,19 @@ The selected thresholds align with U.S. Geological Survey (USGS) standards for R
 )
 
 === Dense Canopy (≥ 0.6)
-The USGS explicitly states that "dense vegetation such as that found in temperate and tropical forests... typically exhibits NDVI values of approximately 0.6 to 0.9" (USGS, 2025). This threshold is the primary basis for defining the "Dense Canopy" class.
+The USGS explicitly states that "dense vegetation such as that found in temperate and tropical forests... typically exhibits NDVI values of approximately 0.6 to 0.9" (USGS, n.d.). This threshold is the primary basis for defining the "Dense Canopy" class.
 
 === Sparse Vegetation (0.2 – 0.4)
-USGS defines "shrub and grassland" as typically falling between 0.2 and 0.5 (USGS, 2025). This methodology uses 0.2–0.4 for sparse and 0.4–0.6 for transitional to segment this broad range.
+USGS defines "shrub and grassland" as typically falling between 0.2 and 0.5 (USGS, n.d.). This methodology uses 0.2–0.4 for sparse and 0.4–0.6 for transitional to segment this broad range.
+
+#block(
+  fill: rgb("#FFF3CD"),
+  inset: 10pt,
+  radius: 4pt,
+  [
+    *Design Decision:* The subdivision at 0.4 NDVI is a methodological choice to separate sparse from transitional vegetation classes. This specific threshold is not independently validated in peer-reviewed literature and may require regional calibration for optimal performance in non-temperate ecosystems.
+  ]
+)
 
 = Trend Analysis
 
@@ -140,7 +160,11 @@ Trends are calculated using Ordinary Least Squares (OLS) regression on annual su
 
 $ beta = (n sum x y - sum x sum y) / (n sum x^2 - (sum x)^2) $
 
-Where $beta$ is the slope (change in NDVI per year) and $n$ is 40 years.
+Where:
+- $beta$ = slope (NDVI change per year)
+- $x$ = year (1985, 1986, ..., 2025)
+- $y$ = summer median NDVI for year $x$
+- $n$ = 40 (number of years in analysis period)
 
 == Trend Significance Thresholds
 
@@ -163,6 +187,27 @@ To separate natural variability from significant change, a slope threshold of ±
 
 === Scientific Basis
 This threshold is derived from Peng & Gong (2025), whose analysis of spatiotemporal NDVI changes classified slopes between 0.005 and 0.016 as "moderate improvement" and defined the stable range as -0.007 to 0.005. This provides a peer-reviewed basis for the cutoff.
+
+=== Momentum Analysis
+
+To detect acceleration or deceleration in recent vegetation change, a secondary 10-year trend (2015–2025) is computed and compared to the 40-year baseline trend. This momentum indicator identifies whether change is intensifying or moderating:
+
+#figure(
+  table(
+    columns: (auto, auto),
+    inset: 8pt,
+    align: left,
+    table.header([*Momentum Class*], [*Condition*]),
+    table.hline(),
+    [Accelerating], [Recent slope > Long-term slope + 0.002],
+    [Consistent], [|Recent slope - Long-term slope| < 0.002],
+    [Decelerating], [Recent slope < Long-term slope - 0.002],
+    table.hline(),
+  ),
+  caption: [Momentum Classification Criteria],
+)
+
+The 0.002 NDVI/year threshold was selected to distinguish meaningful acceleration from noise while remaining sensitive to ecological change dynamics. This dual-timeframe approach helps identify recent shifts in land management or climate-driven vegetation responses.
 
 = Classification Taxonomy
 
@@ -188,6 +233,31 @@ The system intersects absolute state (NDVI) with directional trend (Slope) to pr
   caption: [Trend-Driven Classification Matrix],
 )
 
+== Canopy Establishment Epochs
+
+For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the specific time period when dense canopy was first achieved is tracked using seven 5-year epochs:
+
+#figure(
+  table(
+    columns: (auto, auto, auto),
+    inset: 8pt,
+    align: center,
+    table.header([*Epoch Label*], [*Time Period*], [*Interpretation*]),
+    table.hline(),
+    [1990], [1990–1994], [Early establishment],
+    [1995], [1995–1999], [],
+    [2000], [2000–2004], [Millennium era],
+    [2005], [2005–2009], [],
+    [2010], [2010–2014], [Recent decade],
+    [2015], [2015–2019], [],
+    [2020], [2020–2025], [Latest period],
+    table.hline(),
+  ),
+  caption: [Canopy Establishment Epoch Definitions],
+)
+
+The baseline period (1985–1989) is excluded from epoch tracking as it serves as the initial reference state. The 5-year interval balances temporal precision with data availability, ensuring sufficient cloud-free observations for robust NDVI composites within each epoch.
+
 == Stable/Edge Classes (< ±0.005/yr)
 
 Captures slow transitions often found at forest ecotones:
@@ -209,6 +279,8 @@ The complete source code, including the Google Earth Engine script and documenta
 
 #link("https://github.com/gbrlpzz/ndvi-vegetation-cover-change")
 
+This implementation was developed using the Google Earth Engine JavaScript API via the Code Editor interface (tested as of December 2025). While GEE maintains backward compatibility, users should be aware that API updates may occasionally require minor code adjustments for future compatibility.
+
 = References
 
 #set par(hanging-indent: 2em)
@@ -219,11 +291,11 @@ Pettorelli, N., Vik, J. O., Mysterud, A., Gaillard, J. M., Tucker, C. J., & Sten
 
 Roy, D. P., Kovalskyy, V., Zhang, H. K., Vermote, E. F., Yan, L., Kumar, S. S., & Egorov, A. (2016). Characterization of Landsat-7 to Landsat-8 reflective wavelength and normalized difference vegetation index continuity. _Remote Sensing of Environment_, 185, 57–70. https://doi.org/10.1016/j.rse.2015.12.024
 
-U.S. Geological Survey (USGS). (2025). _NDVI, the Foundation for Remote Sensing Phenology_. Retrieved from https://www.usgs.gov/special-topics/remote-sensing-phenology/science/ndvi-foundation-remote-sensing-phenology
+U.S. Geological Survey (USGS). (n.d.). _NDVI, the Foundation for Remote Sensing Phenology_. Retrieved December 5, 2025, from https://www.usgs.gov/special-topics/remote-sensing-phenology/science/ndvi-foundation-remote-sensing-phenology
 
 #v(1cm)
 #align(center)[
   #text(size: 9pt, fill: gray)[
-    Document version 2.3 | December 2025 | © 2025 Gabriele Pizzi
+    Document version 2.0.0 | December 2025 | © 2025 Gabriele Pizzi
   ]
 ]

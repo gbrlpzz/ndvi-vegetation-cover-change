@@ -1,7 +1,5 @@
 # Vegetation Cover Change Detection
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
-
 A Google Earth Engine script for detecting 40-year vegetation change using harmonized Landsat time series.
 
 ## Quick Start
@@ -60,7 +58,7 @@ If you use this software in your research, please cite:
 **APA:**
 ```
 Pizzi, G. (2025). Vegetation Cover Change Detection (Version 2.0.0) [Computer software]. 
-https://doi.org/10.5281/zenodo.XXXXXXX
+https://github.com/gbrlpzz/ndvi-vegetation-cover-change
 ```
 
 **BibTeX:**
@@ -70,7 +68,6 @@ https://doi.org/10.5281/zenodo.XXXXXXX
   title        = {Vegetation Cover Change Detection},
   year         = 2025,
   version      = {2.0.0},
-  doi          = {10.5281/zenodo.XXXXXXX},
   url          = {https://github.com/gbrlpzz/ndvi-vegetation-cover-change}
 }
 ```
