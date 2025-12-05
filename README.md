@@ -1,4 +1,4 @@
-# Vegetation Cover Change Detection
+# Vegetation Cover Change Detection via NDVI Trend Analysis
 
 A Google Earth Engine script for detecting 40-year vegetation change using harmonized Landsat time series.
 
