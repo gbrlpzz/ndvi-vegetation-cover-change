@@ -222,9 +222,8 @@ The system intersects absolute state (NDVI) with directional trend (Slope) to pr
   caption: [Simplified Classification Matrix],
 )
 
-== Canopy Establishment Epochs
-
-For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the specific time period when dense canopy was first achieved is tracked using 5-year epochs generated dynamically based on the analysis period.
+== Canopy Gain Epochs (Establishment & Maturation)
+For areas classified as "Canopy Establishment" (Sparse/Bare → Dense) or "Maturation" (Transitional → Dense), the specific time period when dense canopy was first achieved is tracked using 5-year epochs generated dynamically based on the analysis period.
 
 #figure(
   table(
@@ -242,7 +241,7 @@ For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the spec
     [2020], [2020–2025], [Latest period],
     table.hline(),
   ),
-  caption: [Canopy Establishment Epoch Definitions],
+  caption: [Canopy Gain Epoch Definitions],
 )
 
 The baseline period (1985–1989) is excluded from epoch tracking as it serves as the initial reference state. The 5-year interval balances temporal precision with data availability, ensuring sufficient cloud-free observations for robust NDVI composites within each epoch.
@@ -278,10 +277,3 @@ Peng, Y., & Gong, H. (2025). Analysis of Spatiotemporal Changes in NDVI-Derived 
 Pettorelli, N., Vik, J. O., Mysterud, A., Gaillard, J. M., Tucker, C. J., & Stenseth, N. C. (2005). Using the satellite-derived NDVI to assess ecological responses to environmental change. _Trends in Ecology & Evolution_, 20(9), 503–510. #link("https://doi.org/10.1016/j.tree.2005.05.011")
 
 Sobrino, J. A., Jiménez-Muñoz, J. C., & Paolini, L. (2004). Land surface temperature retrieval from LANDSAT TM 5. _Remote Sensing of Environment_, 90(4), 434–440. #link("https://doi.org/10.1016/j.rse.2004.02.003")
-
-#v(0.5cm)
-#align(center)[
-  #text(size: 9pt, fill: gray)[
-    Document version 2.0.0 | December 2025 | © 2025 Gabriele Pizzi
-  ]
-]
