@@ -26,13 +26,20 @@ A Google Earth Engine script for detecting multi-decadal vegetation change using
 - **Epoch Tracking**: When areas first reached dense canopy (dynamically generated epochs)
 - **Trajectory Projection**: Estimated year to reach dense canopy
 
-## Layers
-
-| Layer | Default | Description |
-|-------|---------|-------------|
-| Vegetation Change | ✓ On | 8-class change detection |
-| Canopy Establishment Epoch | Off | When area first reached dense canopy |
-| Years to Dense Canopy | Off | Projected years for gaining areas |
+## Output Products
+    
+    The script generates five distinct map layers and one interactive chart:
+    
+    | Layer Name | Description |
+    |------------|-------------|
+    | **Vegetation Change** | Primary 8-class thematic map (see Classification below). |
+    | **Canopy Gain Epoch** | Year of first detection for "Establishment" and "Maturation" classes (5-year cohorts). |
+    | **Years to Dense Canopy** | Projected recovery time based on current linear trends (theoretical). |
+    | **Statistical Trends** | Binary mask showing areas with significant Mann-Kendall trends (p < 0.05). |
+    | **Trend Magnitude** | Slope values (NDVI/year) for significant pixels. |
+    
+    ### Interactive Charts
+    Clicking on the map generates a 40-year NDVI time series chart for that pixel, overlaying the linear trend line and statistical significance.
 
 ## Classification
 
@@ -64,7 +71,7 @@ If you use this software in your research, please cite:
 
 **APA:**
 ```
-Pizzi, G. (2025). Vegetation Cover Change Detection via NDVI Trend Analysis on GEE (Version 2.0.0) [Computer software]. https://doi.org/10.5281/zenodo.17831391
+Pizzi, G. (2025). Vegetation Cover Change Detection via NDVI Trend Analysis on GEE (Version 2.0.1) [Computer software]. https://doi.org/10.5281/zenodo.17831391
 https://github.com/gbrlpzz/ndvi-vegetation-cover-change
 ```
 
@@ -74,7 +81,7 @@ https://github.com/gbrlpzz/ndvi-vegetation-cover-change
   author       = {Pizzi, Gabriele},
   title        = {Vegetation Cover Change Detection via NDVI Trend Analysis on GEE},
   year         = 2025,
-  version      = {2.0.0},
+  version      = {2.0.1},
   doi          = {10.5281/zenodo.17831391},
   url          = {https://github.com/gbrlpzz/ndvi-vegetation-cover-change}
 }

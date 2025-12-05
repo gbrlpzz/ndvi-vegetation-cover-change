@@ -50,7 +50,7 @@
   #v(1fr)
   #text(size: 10pt, fill: gray)[
     © 2025 Gabriele Pizzi. All rights reserved.\
-    Version 2.0.0
+    Version 2.0.1
   ]
 ]
 
@@ -254,7 +254,36 @@ The baseline period (1985–1989) is excluded from epoch tracking as it serves a
 
 #pagebreak()
 
-= Limitations & Caveats
+= Output Data Products
+    
+    The script generates five distinct map layers and one interactive chart for analysis:
+    
+    == Map Layers
+    
+    #figure(
+      table(
+        columns: (auto, auto),
+        inset: 8pt,
+        align: left,
+        table.header([*Layer Name*], [*Description*]),
+        table.hline(),
+        [Vegetation Change], [Primary 8-class thematic map (see Classification Taxonomy).],
+        [Canopy Gain Epoch], [Year of first detection for "Establishment" and "Maturation" classes (5-year cohorts).],
+        [Years to Dense Canopy], [The projected number of years to reach 0.6 NDVI based on current linear trends (theoretical).],
+        [Statistical Trends], [Binary mask showing areas with significant Mann-Kendall trends ($p < 0.05$).],
+        [Trend Magnitude], [Slope values (NDVI/year) for significant pixels.],
+        table.hline(),
+      ),
+      caption: [Geospatial Output Layers],
+    )
+    
+    == Interactive Charts
+    
+    - *NDVI Trend Chart*: Clicking on any pixel plots the full 40-year NDVI time series (1985–2025), overlaying the linear trend line and displaying the calculated slope and significance ($p$-value).
+    
+    #pagebreak()
+    
+    = Limitations & Caveats
 
 Users must acknowledge the following limitations when interpreting results:
 
