@@ -28,7 +28,7 @@ A Google Earth Engine script for detecting multi-decadal vegetation change using
 
 ## Output Products
     
-    The script generates five distinct map layers and one interactive chart:
+The script generates five distinct map layers and one interactive chart:
     
     | Layer Name | Description |
     |------------|-------------|
