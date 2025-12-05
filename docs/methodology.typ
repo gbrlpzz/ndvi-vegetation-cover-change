@@ -54,7 +54,7 @@
 
 = Abstract
 
-This document details the scientific methodology for detecting multi-decadal vegetation cover change (1985–2025) using harmonized Landsat time series. The classification system employs NDVI (Normalized Difference Vegetation Index) thresholds derived from USGS standards and linear trend analysis parameters adapted from peer-reviewed literature (e.g., Peng & Gong, 2025).
+This document details the scientific methodology for detecting multi-decadal vegetation cover change using harmonized Landsat time series. The classification system employs NDVI (Normalized Difference Vegetation Index) thresholds derived from USGS reference values and linear trend analysis parameters adapted from peer-reviewed literature (e.g., Peng & Gong, 2025). The implementation allows for dynamic temporal configuration and sensitivity analysis to adapt to different biomes.
 
 = Introduction
 
@@ -62,7 +62,7 @@ Vegetation monitoring requires consistent definition of land cover states. This 
 
 == Applicability Scope
 
-This methodology is calibrated for temperate and Mediterranean ecosystems. Users should note that optimal NDVI thresholds vary by latitude and biome (Pettorelli et al., 2005).
+This methodology is calibrated for temperate and Mediterranean ecosystems. Users should note that optimal NDVI thresholds vary by latitude and biome (Pettorelli et al., 2005). Additionally, the analysis period is configurable to account for hemispheric seasonality differences (e.g., June-September for Northern Hemisphere, December-March for Southern).
 
 = Data Processing
 
@@ -138,10 +138,14 @@ The selected thresholds align with U.S. Geological Survey (USGS) standards for R
 )
 
 === Dense Canopy (≥ 0.6)
-The USGS explicitly states that "dense vegetation such as that found in temperate and tropical forests... typically exhibits NDVI values of approximately 0.6 to 0.9" (USGS, n.d.). This threshold is the primary basis for defining the "Dense Canopy" class.
+The USGS states that "dense vegetation such as that found in temperate and tropical forests... typically exhibits NDVI values of approximately 0.6 to 0.9" (USGS, n.d.). This serves as the default reference value for the "Dense Canopy" class, though users should calibrate this based on local phenology.
 
 === Sparse Vegetation (0.2 – 0.4)
-USGS defines "shrub and grassland" as typically falling between 0.2 and 0.5 (USGS, n.d.). This methodology uses 0.2–0.4 for sparse and 0.4–0.6 for transitional to segment this broad range.
+USGS defines "shrub and grassland" as typically falling between 0.2 and 0.5 (USGS, n.d.). This methodology uses 0.2–0.4 for sparse and 0.4–0.6 for transitional, but these parameters are exposed in the configuration to allow for regional tuning.
+
+== Sensitivity Analysis
+
+The system includes a `SENSITIVITY_ADJUSTMENT` parameter (default 0.0) that applies a global offset to all NDVI thresholds. This allows researchers to test the stability of classification results against threshold variations (e.g., ±0.05), providing a mechanism to assess the robustness of the detected changes.
 
 #block(
   fill: rgb("#FFF3CD"),
@@ -164,7 +168,8 @@ Where:
 - $beta$ = slope (NDVI change per year)
 - $x$ = year (1985, 1986, ..., 2025)
 - $y$ = summer median NDVI for year $x$
-- $n$ = 40 (number of years in analysis period)
+- $y$ = summer median NDVI for year $x$
+- $n$ = number of years in analysis period (dynamic)
 
 == Trend Significance Thresholds
 
@@ -235,7 +240,7 @@ The system intersects absolute state (NDVI) with directional trend (Slope) to pr
 
 == Canopy Establishment Epochs
 
-For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the specific time period when dense canopy was first achieved is tracked using seven 5-year epochs:
+For areas classified as "Canopy Establishment" (Sparse/Bare → Dense), the specific time period when dense canopy was first achieved is tracked using 5-year epochs generated dynamically based on the analysis period.
 
 #figure(
   table(
@@ -269,8 +274,8 @@ Captures slow transitions often found at forest ecotones:
 
 Users must acknowledge the following limitations when interpreting results:
 
-1.  *Threshold Universality*: While the 0.6 threshold is standard for temperate/tropical forests (USGS, 2025), boreal or dryland forests may require lower thresholds (e.g., 0.5).
-2.  *Linearity Assumption*: Vegetation recovery often follows a sigmoid curve. Linear regression provides an average rate but may underestimate rapid recovery phases.
+1.  *Threshold Universality*: While the 0.6 threshold is a common reference for temperate/tropical forests (USGS, 2025), it should be treated as a starting point. Boreal or dryland forests may require lower thresholds (e.g., 0.5).
+2.  *Linearity Assumption*: The "Years to Dense Canopy" projection is a theoretical statement based on linear extrapolation. Ecological recovery is typically sigmoid/asymptotic. This projection does not account for carrying capacity saturation and should be interpreted as a mathematical trajectory rather than a biological prediction.
 3.  *Sensor Homogeneity*: Despite harmonization (Roy et al., 2016), minor spectral differences between Landsat generations may influence trend calculations in subtle ways.
 
 = Code Availability

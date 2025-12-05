@@ -12,12 +12,15 @@ A Google Earth Engine script for detecting 40-year vegetation change using harmo
 ## Features
 
 - **9 Change Classes**: Canopy loss, thinning, emerging biomass, thickening, densification, establishment, and 3 edge dynamics
-- **Multi-scale Trend Analysis**: Compares 40-year long-term trend with 10-year recent trend (Momentum)
+- **Dynamic Configuration**: Easily adjustable analysis period (Year Start/End) and thresholds
+- **Hemispheric/Seasonal Adaptation**: Configurable START/END months for Northern/Southern hemisphere analysis
+- **Sensitivity Analysis**: built-in parameter to test threshold stability
+- **Multi-scale Trend Analysis**: Compares long-term trend with recent momentum
 - **Momentum Indicator**: Identifies accelerating vs decelerating growth in the Inspector
 - **Spectral Harmonization**: Landsat 8/9 data harmonized to Landsat 7 standards (Roy et al., 2016)
-- **Dynamic Legend**: Updates based on active layer
+- **Dynamic Legend**: Updates based on active layer and time configuration
 - **Point Inspector**: NDVI, trend, classification, and projection
-- **Epoch Tracking**: When areas first reached dense canopy
+- **Epoch Tracking**: When areas first reached dense canopy (dynamically generated epochs)
 - **Trajectory Projection**: Estimated year to reach dense canopy
 
 ## Layers

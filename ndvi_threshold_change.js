@@ -26,22 +26,34 @@
 
 // 1. CONFIGURATION
 
+// Time Series Parameters
 var startYear = 1985;
-var endYear = 2025;
+var endYear = 2025; // Update this to extend analysis
+var recentYearStart = endYear - 10; // Dynamic 10-year momentum window
 
-// NDVI Thresholds (Literature-validated)
-// Source: Multiple peer-reviewed studies on vegetation classification
-var DENSE_CANOPY = 0.6;      // Dense forest canopy (≥30% cover)
-var TRANSITIONAL = 0.4;      // Transitional woodland-shrub
-var SPARSE = 0.2;            // Sparse vegetation / open land
+// SENSITIVITY ANALYSIS
+// Set to a value (e.g. ±0.05) to test threshold stability. Default 0.
+var SENSITIVITY_ADJUSTMENT = 0.0;
+
+// Seasonality Parameters (Months 1-12)
+// Default: June (6) to Sept (9) for Northern Hemisphere Summer
+var START_MONTH = 6;
+var END_MONTH = 9;
+
+// NDVI Thresholds (Literature-validated + Sensitivity)
+var DENSE_CANOPY = 0.6 + SENSITIVITY_ADJUSTMENT;      // Dense forest canopy
+var TRANSITIONAL = 0.4 + SENSITIVITY_ADJUSTMENT;      // Transitional woodland-shrub
+var SPARSE = 0.2 + SENSITIVITY_ADJUSTMENT;            // Sparse vegetation / open land
 
 // Trend Thresholds (Source: MDPI Kunming study)
-// Slope of 0.005 NDVI/year = significant change
 var GAINING_SLOPE = 0.005;   // Active biomass accumulation
 var LOSING_SLOPE = -0.005;   // Active biomass decline
 
 // Region of Interest
 var roi = roi || Map.getBounds(true);
+if (typeof roi === 'undefined' || roi === Map.getBounds(true)) {
+  print('⚠️ WARNING: using viewport bounds. For reproducible results, define a geometry.');
+}
 
 // 2. DATA PROCESSING
 
@@ -82,14 +94,15 @@ var fullCollection = l5.merge(l7).merge(l8).merge(l9);
 
 function getSummerNDVI(startDate, endDate) {
   return fullCollection.filterDate(startDate, endDate)
-    .filter(ee.Filter.calendarRange(6, 9, 'month'))
+    .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
     .median()
     .normalizedDifference(['NIR', 'Red']);
 }
 
-// Baseline (1985-1989) and Current (2021-2025) states
-var startNDVI = getSummerNDVI('1985-01-01', '1989-12-31');
-var endNDVI = getSummerNDVI('2021-01-01', '2025-12-31');
+// Baseline (startYear to startYear+4) and Current (endYear-4 to endYear) states
+// Using 5-year averages for stable state definition
+var startNDVI = getSummerNDVI(startYear + '-01-01', (startYear + 4) + '-12-31');
+var endNDVI = getSummerNDVI((endYear - 4) + '-01-01', endYear + '-12-31');
 
 // Vegetation class: 1=Dense, 2=Transitional, 3=Sparse, 4=Bare
 function classifyNDVI(ndvi) {
@@ -102,10 +115,10 @@ function classifyNDVI(ndvi) {
 var startClass = classifyNDVI(startNDVI);
 var endClass = classifyNDVI(endNDVI);
 
-// 4. TREND ANALYSIS (Full 40-year period for robust trend)
+// 4. TREND ANALYSIS (Full period)
 
-var trendCollection = fullCollection.filterDate('1985-01-01', '2025-12-31')
-  .filter(ee.Filter.calendarRange(6, 9, 'month'))
+var trendCollection = fullCollection.filterDate(startYear + '-01-01', endYear + '-12-31')
+  .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
   .map(function (img) {
     var ndvi = img.normalizedDifference(['NIR', 'Red']).rename('NDVI');
     var t = ee.Image.constant(img.get('system:time_start')).divide(31536000000).float().rename('t');
@@ -116,9 +129,9 @@ var linearFit = trendCollection.select(['t', 'NDVI']).reduce(ee.Reducer.linearFi
 var slope = linearFit.select('scale');
 var intercept = linearFit.select('offset');
 
-// Recent 10-year trend (2015-2025) for momentum comparison
-var recentTrendCollection = fullCollection.filterDate('2015-01-01', '2025-12-31')
-  .filter(ee.Filter.calendarRange(6, 9, 'month'))
+// Recent Trend (Dynamic)
+var recentTrendCollection = fullCollection.filterDate(recentYearStart + '-01-01', endYear + '-12-31')
+  .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
   .map(function (img) {
     var ndvi = img.normalizedDifference(['NIR', 'Red']).rename('NDVI');
     var t = ee.Image.constant(img.get('system:time_start')).divide(31536000000).float().rename('t');
@@ -184,17 +197,15 @@ changeClass = changeClass.where(
 
 changeClass = changeClass.rename('change_class');
 
-// 6. CANOPY ESTABLISHMENT EPOCHS
+// 6. CANOPY ESTABLISHMENT EPOCHS (Dynamic Generation)
 
-var epochs = [
-  { start: 1990, end: 1994, label: 1990 },
-  { start: 1995, end: 1999, label: 1995 },
-  { start: 2000, end: 2004, label: 2000 },
-  { start: 2005, end: 2009, label: 2005 },
-  { start: 2010, end: 2014, label: 2010 },
-  { start: 2015, end: 2019, label: 2015 },
-  { start: 2020, end: 2025, label: 2020 }
-];
+var epochs = [];
+// Generate 5-year epochs starting from startYear + 5 (since first 5 are baseline)
+for (var y = startYear + 5; y <= endYear; y += 5) {
+  // Ensure the last epoch matches endYear
+  var eEnd = Math.min(y + 4, endYear);
+  epochs.push({ start: y, end: eEnd, label: y });
+}
 
 var epochCollection = ee.ImageCollection.fromImages(
   epochs.map(function (epoch) {
@@ -248,9 +259,10 @@ var changeViz = {
 Map.addLayer(changeClass.updateMask(changeClass.gt(0)), changeViz, 'Vegetation Change');
 
 // Establishment epochs (off by default)
+// Dynamic visualization range based on generated epochs
 var epochViz = {
-  min: 1990,
-  max: 2020,
+  min: epochs.length > 0 ? epochs[0].label : 1990,
+  max: epochs.length > 0 ? epochs[epochs.length - 1].label : 2020,
   palette: ['08306b', '2171b5', '4eb3d3', '7fcdbb', 'c7e9b4', 'ffffb2', 'fd8d3c']
 };
 Map.addLayer(establishmentEpoch, epochViz, 'Canopy Establishment Epoch', false);
@@ -261,7 +273,7 @@ var projViz = {
   max: 30,
   palette: ['00FF00', 'FFFF00', 'FF0000'] // Green (soon) to Red (distant)
 };
-Map.addLayer(yearsToCanopy, projViz, 'Years to Dense Canopy (Projection)', false);
+Map.addLayer(yearsToCanopy, projViz, 'Years to Dense Canopy (Theoretical)', false);
 
 // DYNAMIC LEGEND - Updates based on visible layer
 var legend = ui.Panel({
@@ -281,17 +293,6 @@ function makeRow(color, name, desc) {
   return ui.Panel({ widgets: [colorBox, textPanel], layout: ui.Panel.Layout.Flow('horizontal'), style: { margin: '0 0 2px 0' } });
 }
 
-function makeGradient(colors, labels) {
-  var gradientPanel = ui.Panel({ layout: ui.Panel.Layout.Flow('horizontal'), style: { margin: '4px 0' } });
-  for (var i = 0; i < colors.length; i++) {
-    gradientPanel.add(ui.Label({
-      value: labels[i],
-      style: { backgroundColor: '#' + colors[i], color: i < colors.length / 2 ? 'white' : 'black', padding: '4px 8px', fontSize: '9px', margin: '0' }
-    }));
-  }
-  return gradientPanel;
-}
-
 function updateLegend(layerName) {
   legend.clear();
 
@@ -299,18 +300,22 @@ function updateLegend(layerName) {
     // Epoch legend
     legend.add(ui.Label({ value: 'Canopy Establishment Epoch', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
     legend.add(ui.Label({ value: 'When area first reached dense canopy', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
-    legend.add(makeRow('08306b', '1990-1994', 'Earliest'));
-    legend.add(makeRow('2171b5', '1995-1999', ''));
-    legend.add(makeRow('4eb3d3', '2000-2004', ''));
-    legend.add(makeRow('7fcdbb', '2005-2009', ''));
-    legend.add(makeRow('c7e9b4', '2010-2014', ''));
-    legend.add(makeRow('ffffb2', '2015-2019', ''));
-    legend.add(makeRow('fd8d3c', '2020-2025', 'Latest'));
 
-  } else if (layerName === 'Years to Dense Canopy (Projection)') {
+    // Dynamically generate legend rows from epochs array
+    var palette = epochViz.palette;
+    for (var i = 0; i < epochs.length; i++) {
+      var e = epochs[i];
+      // Cycle through palette if more epochs than colors
+      var color = palette[i % palette.length];
+      var label = e.start + '-' + e.end;
+      var desc = (i === 0) ? 'Earliest' : ((i === epochs.length - 1) ? 'Latest' : '');
+      legend.add(makeRow(color, label, desc));
+    }
+
+  } else if (layerName === 'Years to Dense Canopy (Theoretical)') {
     // Projection legend
     legend.add(ui.Label({ value: 'Years to Dense Canopy', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
-    legend.add(ui.Label({ value: 'Linear projection for gaining areas', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
+    legend.add(ui.Label({ value: 'Theoretical linear projection', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
     legend.add(makeRow('00FF00', '0-5 years', 'Imminent'));
     legend.add(makeRow('7FFF00', '5-10 years', ''));
     legend.add(makeRow('FFFF00', '10-20 years', ''));
@@ -320,9 +325,10 @@ function updateLegend(layerName) {
   } else {
     // Default: Vegetation Change legend
     legend.add(ui.Label({ value: 'Vegetation Cover Change', style: { fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0' } }));
-    legend.add(ui.Label({ value: '40-Year Analysis (1985-2025)', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
+    var duration = endYear - startYear;
+    legend.add(ui.Label({ value: duration + '-Year Analysis (' + startYear + '-' + endYear + ')', style: { fontSize: '10px', color: '666666', margin: '0 0 10px 0' } }));
 
-    legend.add(ui.Label({ value: 'With Strong Trend (>±0.005/yr)', style: { fontSize: '9px', color: '666666', margin: '0 0 4px 0' } }));
+    legend.add(ui.Label({ value: 'With Strong Trend (>±' + GAINING_SLOPE + '/yr)', style: { fontSize: '9px', color: '666666', margin: '0 0 4px 0' } }));
     legend.add(makeRow('FF00FF', 'Canopy Loss', 'Dense → Sparse/Bare'));
     legend.add(makeRow('FFA500', 'Canopy Thinning', 'Dense → Trans (losing)'));
     legend.add(makeRow('ADFF2F', 'Emerging Biomass', 'Sparse → Trans (gaining)'));
@@ -330,13 +336,13 @@ function updateLegend(layerName) {
     legend.add(makeRow('006400', 'Canopy Densification', 'Dense → Dense (gaining)'));
     legend.add(makeRow('0000FF', 'Canopy Establishment', 'Sparse → Dense'));
 
-    legend.add(ui.Label({ value: 'With Stable Trend (<±0.005/yr)', style: { fontSize: '9px', color: '666666', margin: '8px 0 4px 0' } }));
+    legend.add(ui.Label({ value: 'With Stable Trend (<±' + GAINING_SLOPE + '/yr)', style: { fontSize: '9px', color: '666666', margin: '8px 0 4px 0' } }));
     legend.add(makeRow('FFFF00', 'Edge Expansion', 'Sparse → Trans'));
     legend.add(makeRow('00CED1', 'Edge Colonization', 'Trans → Dense'));
     legend.add(makeRow('DDA0DD', 'Edge Retreat', 'Dense → Trans'));
 
     var footerPanel = ui.Panel({ style: { margin: '10px 0 0 0', padding: '8px 0 0 0' } });
-    footerPanel.add(ui.Label({ value: 'Dense ≥0.6 | Trans 0.4-0.6 | Sparse 0.2-0.4', style: { fontSize: '9px', color: '888888' } }));
+    footerPanel.add(ui.Label({ value: 'Dense ≥' + DENSE_CANOPY + ' | Trans ' + TRANSITIONAL + '-' + DENSE_CANOPY + ' | Sparse ' + SPARSE + '-' + TRANSITIONAL, style: { fontSize: '9px', color: '888888' } }));
     legend.add(footerPanel);
   }
 }
@@ -415,7 +421,7 @@ function updateInspector(coords) {
 
   // Create NDVI time series
   var ndviSeries = fullCollection
-    .filter(ee.Filter.calendarRange(6, 9, 'month'))
+    .filter(ee.Filter.calendarRange(START_MONTH, END_MONTH, 'month'))
     .map(function (img) {
       var ndvi = img.normalizedDifference(['NIR', 'Red']);
       return ee.Feature(point, {
@@ -424,7 +430,7 @@ function updateInspector(coords) {
           geometry: point,
           scale: 30
         }).get('nd'),
-        'system:time_start': img.get('system:time_start')
+        'system:time_start': image.get('system:time_start')
       });
     });
 
@@ -452,16 +458,18 @@ function updateInspector(coords) {
     ));
 
     // Current state section
-    inspectorPanel.add(ui.Label('Current State (2021-2025)', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
+    var currentYearStart = endYear - 4;
+    inspectorPanel.add(ui.Label('Current State (' + currentYearStart + '-' + endYear + ')', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
 
     var currentNDVI = res.current_ndvi || 0;
     var currentClass = vegNames[res.end_class] || 'Unknown';
-    var ndviColor = currentNDVI >= 0.6 ? '006400' : (currentNDVI >= 0.4 ? '90EE90' : (currentNDVI >= 0.2 ? 'AAAA00' : 'AA6600'));
+    // Dynamic color coding based on active thresholds
+    var ndviColor = currentNDVI >= DENSE_CANOPY ? '006400' : (currentNDVI >= TRANSITIONAL ? '90EE90' : (currentNDVI >= SPARSE ? 'AAAA00' : 'AA6600'));
 
     var currentPanel = ui.Panel({
       widgets: [
         ui.Label('NDVI: ' + currentNDVI.toFixed(3), { fontSize: '11px', fontWeight: 'bold' }),
-        ui.Label(currentClass, { fontSize: '11px', backgroundColor: '#' + ndviColor, color: currentNDVI >= 0.4 ? 'white' : 'black', padding: '2px 6px' })
+        ui.Label(currentClass, { fontSize: '11px', backgroundColor: '#' + ndviColor, color: currentNDVI >= TRANSITIONAL ? 'white' : 'black', padding: '2px 6px' })
       ],
       layout: ui.Panel.Layout.Flow('horizontal'),
       style: { margin: '0 0 8px 0' }
@@ -471,18 +479,19 @@ function updateInspector(coords) {
     // Trend section
     var slopeVal = res.slope || 0;
     var recentSlopeVal = res.recent_slope || 0;
-    var slopeClass = slopeVal > 0.005 ? 'Gaining' : (slopeVal < -0.005 ? 'Losing' : 'Stable');
-    var slopeColor = slopeVal > 0.005 ? '228B22' : (slopeVal < -0.005 ? 'CC0000' : '888888');
-    var recentClass = recentSlopeVal > 0.005 ? 'Gaining' : (recentSlopeVal < -0.005 ? 'Losing' : 'Stable');
-    var recentColor = recentSlopeVal > 0.005 ? '228B22' : (recentSlopeVal < -0.005 ? 'CC0000' : '888888');
+    var slopeClass = slopeVal > GAINING_SLOPE ? 'Gaining' : (slopeVal < LOSING_SLOPE ? 'Losing' : 'Stable');
+    var slopeColor = slopeVal > GAINING_SLOPE ? '228B22' : (slopeVal < LOSING_SLOPE ? 'CC0000' : '888888');
+    var recentClass = recentSlopeVal > GAINING_SLOPE ? 'Gaining' : (recentSlopeVal < LOSING_SLOPE ? 'Losing' : 'Stable');
+    var recentColor = recentSlopeVal > GAINING_SLOPE ? '228B22' : (recentSlopeVal < LOSING_SLOPE ? 'CC0000' : '888888');
 
-    // Determine momentum (comparing recent to long-term)
+    // Determine momentum
     var momentum = '';
     var momentumColor = '888888';
-    if (Math.abs(recentSlopeVal - slopeVal) < 0.002) {
+    var MOMENTUM_THRESHOLD = 0.002;
+    if (Math.abs(recentSlopeVal - slopeVal) < MOMENTUM_THRESHOLD) {
       momentum = '→ Consistent';
       momentumColor = '666666';
-    } else if (recentSlopeVal > slopeVal + 0.002) {
+    } else if (recentSlopeVal > slopeVal + MOMENTUM_THRESHOLD) {
       momentum = '↑ Accelerating';
       momentumColor = '228B22';
     } else {
@@ -492,10 +501,11 @@ function updateInspector(coords) {
 
     inspectorPanel.add(ui.Label('Trend Analysis', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
 
-    // 40-year row
+    // Long-term row
+    var duration = endYear - startYear;
     var trend40Panel = ui.Panel({
       widgets: [
-        ui.Label('40yr:', { fontSize: '10px', color: '666666' }),
+        ui.Label(duration + 'yr:', { fontSize: '10px', color: '666666' }),
         ui.Label((slopeVal * 1000).toFixed(2) + '×10⁻³/yr', { fontSize: '10px' }),
         ui.Label(slopeClass, { fontSize: '10px', color: slopeColor, fontWeight: 'bold' })
       ],
@@ -504,7 +514,7 @@ function updateInspector(coords) {
     });
     inspectorPanel.add(trend40Panel);
 
-    // 10-year row
+    // Recent row
     var trend10Panel = ui.Panel({
       widgets: [
         ui.Label('10yr:', { fontSize: '10px', color: '666666' }),
@@ -524,7 +534,7 @@ function updateInspector(coords) {
     // State transition
     inspectorPanel.add(ui.Label('State Transition', { fontWeight: 'bold', fontSize: '11px', margin: '0 0 4px 0' }));
     inspectorPanel.add(ui.Label(
-      '1985: ' + (vegNames[res.start_class] || '?') + '  →  2025: ' + (vegNames[res.end_class] || '?'),
+      startYear + ': ' + (vegNames[res.start_class] || '?') + '  →  ' + endYear + ': ' + (vegNames[res.end_class] || '?'),
       { fontSize: '11px', margin: '0 0 8px 0' }
     ));
 
@@ -533,7 +543,7 @@ function updateInspector(coords) {
     if (res.change_class && res.change_class > 0) {
       var changeColors = ['FF00FF', 'FFA500', '7CFC00', '90EE90', '006400', '0000FF', 'FFFF00', '00CED1', 'DDA0DD'];
       var changeColor = changeColors[res.change_class - 1] || 'CCCCCC';
-      var lightTextClasses = [3, 4, 7]; // Classes that need dark text
+      var lightTextClasses = [3, 4, 7];
       var changePanel = ui.Panel({
         style: { backgroundColor: '#' + changeColor, padding: '6px 10px', margin: '0 0 4px 0' }
       });
@@ -550,31 +560,29 @@ function updateInspector(coords) {
     inspectorPanel.add(ui.Label('Dense Canopy Status', { fontWeight: 'bold', fontSize: '11px', margin: '8px 0 4px 0' }));
 
     var statusPanel = ui.Panel({ style: { margin: '0 0 4px 0' } });
-    var startedDense = res.start_class === 1; // Was Dense at start (1985)
-    var nowDense = res.current_ndvi >= 0.6;
+    var startedDense = res.start_class === 1;
+    var nowDense = res.current_ndvi >= DENSE_CANOPY;
 
     if (res.epoch) {
-      // Sparse/Bare → Dense with tracked epoch
-      var epochEnd = res.epoch === 2020 ? 2025 : res.epoch + 4;
+      // Dynamic epoch end calculation
+      var epochEnd = res.epoch === epochs[epochs.length - 1].label ? endYear : res.epoch + 4;
       statusPanel.add(ui.Label('✓ Established: ' + res.epoch + '-' + epochEnd, {
         fontSize: '11px', color: '228B22', fontWeight: 'bold'
       }));
-      statusPanel.add(ui.Label('First reached NDVI ≥0.6 (from sparse/bare)', {
+      statusPanel.add(ui.Label('First reached NDVI ≥' + DENSE_CANOPY + ' (from sparse/bare)', {
         fontSize: '9px', color: '666666', fontStyle: 'italic'
       }));
     } else if (startedDense && nowDense) {
-      // Was Dense, still Dense - established before study
-      statusPanel.add(ui.Label('✓ Established: pre-1985', {
+      statusPanel.add(ui.Label('✓ Established: pre-' + startYear, {
         fontSize: '11px', color: '228B22', fontWeight: 'bold'
       }));
       statusPanel.add(ui.Label('Dense canopy throughout study period', {
         fontSize: '9px', color: '666666', fontStyle: 'italic'
       }));
     } else if (!startedDense && nowDense && slopeVal > 0) {
-      // Transitioned TO Dense (from Trans) - estimate when it crossed 0.6
-      // back-calculate: years ago = (current - 0.6) / slope
-      var yearsAgo = (currentNDVI - 0.6) / slopeVal;
-      var crossYear = Math.round(2025 - yearsAgo);
+      // Transitioned TO Dense
+      var yearsAgo = (currentNDVI - DENSE_CANOPY) / slopeVal;
+      var crossYear = Math.round(endYear - yearsAgo);
       statusPanel.add(ui.Label('✓ Established: ~' + crossYear, {
         fontSize: '11px', color: '228B22', fontWeight: 'bold'
       }));
@@ -582,7 +590,6 @@ function updateInspector(coords) {
         fontSize: '9px', color: '666666', fontStyle: 'italic'
       }));
     } else if (!startedDense && nowDense) {
-      // Now dense but stable/declining - recently crossed
       statusPanel.add(ui.Label('✓ Established: ~2020s', {
         fontSize: '11px', color: '228B22', fontWeight: 'bold'
       }));
@@ -590,30 +597,29 @@ function updateInspector(coords) {
         fontSize: '9px', color: '666666', fontStyle: 'italic'
       }));
     } else if (slopeVal > 0) {
-      // Gaining - calculate years based on current NDVI and slope
-      var yearsNeeded = (0.6 - currentNDVI) / slopeVal;
+      // Gaining
+      var yearsNeeded = (DENSE_CANOPY - currentNDVI) / slopeVal;
       if (yearsNeeded <= 0) {
         statusPanel.add(ui.Label('✓ At threshold', {
           fontSize: '11px', color: '228B22', fontWeight: 'bold'
         }));
       } else if (yearsNeeded <= 50) {
-        var projYear = 2025 + Math.round(yearsNeeded);
+        var projYear = endYear + Math.round(yearsNeeded);
         statusPanel.add(ui.Label('↗ Projected: ~' + projYear, {
           fontSize: '11px', color: '0066CC', fontWeight: 'bold'
         }));
-        statusPanel.add(ui.Label('Est. ' + Math.round(yearsNeeded) + ' years to reach NDVI ≥0.6', {
+        statusPanel.add(ui.Label('Est. ' + Math.round(yearsNeeded) + ' years to reach NDVI ≥' + DENSE_CANOPY, {
           fontSize: '9px', color: '666666', fontStyle: 'italic'
         }));
       } else {
-        statusPanel.add(ui.Label('↗ Projected: ~' + (2025 + Math.round(yearsNeeded)) + ' (slow)', {
+        statusPanel.add(ui.Label('↗ Projected: ~' + (endYear + Math.round(yearsNeeded)) + ' (slow)', {
           fontSize: '11px', color: '888888'
         }));
         statusPanel.add(ui.Label('~' + Math.round(yearsNeeded) + ' years at current rate', {
           fontSize: '9px', color: '999999', fontStyle: 'italic'
         }));
       }
-    } else if (slopeVal < -0.005) {
-      // Losing strongly
+    } else if (slopeVal < LOSING_SLOPE) {
       statusPanel.add(ui.Label('↘ Declining (no projection)', {
         fontSize: '11px', color: 'CC0000'
       }));
@@ -621,15 +627,13 @@ function updateInspector(coords) {
         fontSize: '9px', color: '999999', fontStyle: 'italic'
       }));
     } else if (slopeVal < 0) {
-      // Slight decline
       statusPanel.add(ui.Label('↘ Slight decline', {
         fontSize: '11px', color: 'CC6600'
       }));
-      statusPanel.add(ui.Label('Trend negative but below -0.005/yr', {
+      statusPanel.add(ui.Label('Trend negative but below ' + LOSING_SLOPE + '/yr', {
         fontSize: '9px', color: '999999', fontStyle: 'italic'
       }));
     } else {
-      // Truly stable (slope = 0)
       statusPanel.add(ui.Label('— Stable (no change)', {
         fontSize: '11px', color: '888888'
       }));
@@ -646,7 +650,7 @@ function updateInspector(coords) {
       yProperties: ['NDVI']
     }).setChartType('ScatterChart')
       .setOptions({
-        title: 'NDVI Trend (1985-2025)',
+        title: 'NDVI Trend (' + startYear + '-' + endYear + ')',
         titleTextStyle: { fontSize: 11, bold: true },
         hAxis: { title: '', format: 'yyyy', textStyle: { fontSize: 9 } },
         vAxis: {
@@ -667,9 +671,17 @@ function updateInspector(coords) {
 
     // Threshold reference
     inspectorPanel.add(ui.Label(
-      'Thresholds: Dense≥0.6 | Trans 0.4-0.6 | Sparse 0.2-0.4',
+      'Thresholds: Dense≥' + DENSE_CANOPY + ' | Trans ' + TRANSITIONAL + '-' + DENSE_CANOPY + ' | Sparse ' + SPARSE + '-' + TRANSITIONAL,
       { fontSize: '9px', color: '888888', margin: '4px 0 0 0' }
     ));
+
+    // Sensitivity Warning
+    if (SENSITIVITY_ADJUSTMENT !== 0) {
+      inspectorPanel.add(ui.Label(
+        '⚠️ Sensitivity Analysis Active (Adj: ' + (SENSITIVITY_ADJUSTMENT > 0 ? '+' : '') + SENSITIVITY_ADJUSTMENT + ')',
+        { fontSize: '9px', color: 'BC8F8F', margin: '2px 0 0 0', fontWeight: 'bold' }
+      ));
+    }
   });
 }
 
@@ -679,7 +691,7 @@ Map.onClick(updateInspector);
 
 Export.image.toDrive({
   image: changeClass.byte(),
-  description: 'Export_Change_Classes',
+  description: 'Export_Change_Classes_' + startYear + '_' + endYear,
   scale: 30,
   region: roi,
   crs: 'EPSG:4326',
@@ -688,7 +700,7 @@ Export.image.toDrive({
 
 Export.image.toDrive({
   image: establishmentEpoch.unmask(0).short(),
-  description: 'Export_Establishment_Epoch',
+  description: 'Export_Establishment_Epoch_' + startYear + '_' + endYear,
   scale: 30,
   region: roi,
   crs: 'EPSG:4326',
